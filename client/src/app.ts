@@ -14,7 +14,7 @@ class VimApp {
   private safeAddressDisplay: HTMLSpanElement;
   private signerAddressDisplay: HTMLSpanElement;
   private commandInput: HTMLInputElement;
-  private mode: 'NORMAL' = 'NORMAL';
+  private mode: 'READ ONLY' | 'TX' = 'READ ONLY';
   private command: string = '';
   private safeAddress: string | null = null;
   private signerAddress: string | null = null;
@@ -64,7 +64,7 @@ class VimApp {
   }
 
   private updateStatus(): void {
-    this.statusBar.textContent = this.command ? `:${this.command}` : '-- NORMAL --';
+    this.statusBar.textContent = this.command ? `:${this.command}` : `-- ${this.mode} --`;
   }
 
   private showHelpGuide(): void {
@@ -78,6 +78,31 @@ class VimApp {
     const helpTitle = document.createElement('h3');
     helpTitle.className = 'text-blue-400 font-bold mb-4';
     helpTitle.textContent = 'Help & Usage Guide';
+
+    // Mode switching section
+    const modeTitle = document.createElement('h4');
+    modeTitle.className = 'text-blue-400 font-semibold mt-4 mb-2';
+    modeTitle.textContent = 'Mode Switching';
+
+    const modeList = document.createElement('ul');
+    modeList.className = 'text-gray-300 mb-4';
+    
+    const modes = [
+      { key: 'e', desc: 'Switch to TX mode (requires connected wallet via :wc)' },
+      { key: 'ESC', desc: 'Return to READ ONLY mode' }
+    ];
+
+    modes.forEach(({ key, desc }) => {
+      const modeItem = document.createElement('li');
+      modeItem.className = 'mb-2';
+      modeItem.innerHTML = `<span class="text-blue-400 font-semibold">${key}</span> - ${desc}`;
+      modeList.appendChild(modeItem);
+    });
+
+    // Commands section
+    const commandsTitle = document.createElement('h4');
+    commandsTitle.className = 'text-blue-400 font-semibold mt-4 mb-2';
+    commandsTitle.textContent = 'Commands';
 
     const commandsList = document.createElement('ul');
     commandsList.className = 'text-gray-300';
@@ -100,6 +125,9 @@ class VimApp {
     });
 
     helpBox.appendChild(helpTitle);
+    helpBox.appendChild(modeTitle);
+    helpBox.appendChild(modeList);
+    helpBox.appendChild(commandsTitle);
     helpBox.appendChild(commandsList);
 
     if (this.inputContainer) {
@@ -510,6 +538,23 @@ class VimApp {
     if (e.key === ':') {
       this.command = ':';
       console.log('Started command mode');
+    } else if (e.key === 'e' && !this.command && this.mode === 'READ ONLY') {
+      // Only allow TX mode if wallet is connected
+      if (this.signerAddress) {
+        this.mode = 'TX';
+        console.log('Switched to TX mode');
+      } else {
+        console.log('Cannot switch to TX mode: wallet not connected');
+        this.buffer.textContent = 'Please connect wallet first using :wc command';
+        this.buffer.className = 'flex-1 p-4 overflow-y-auto text-yellow-400';
+      }
+    } else if (e.key === 'Escape') {
+      if (this.command) {
+        this.command = '';
+      } else if (this.mode === 'TX') {
+        this.mode = 'READ ONLY';
+        console.log('Switched to READ ONLY mode');
+      }
     } else if (this.command.startsWith(':')) {
       if (e.key === 'Enter') {
         console.log('Executing command:', this.command);
@@ -530,7 +575,6 @@ class VimApp {
     this.buffer.className = 'flex-1 p-4 overflow-y-auto';
 
     // Clear the help screen and buffer before executing any command
-    // But preserve help container if input field is visible (before :c)
     if (!this.inputContainer) {
       this.helpContainer.innerHTML = '';
       this.helpContainer.classList.add('hidden');
@@ -591,6 +635,8 @@ class VimApp {
       await this.disconnectWallet();
       this.signerAddress = null;
       this.signerAddressDisplay.textContent = '';
+      // Force READ ONLY mode on disconnect
+      this.mode = 'READ ONLY';
     } else if (this.command === ':q') {
       this.buffer.textContent = '';
       this.buffer.className = 'flex-1 p-4 overflow-y-auto';
@@ -603,6 +649,8 @@ class VimApp {
       this.signerAddressDisplay.textContent = '';
       this.buffer.textContent = '';
       this.buffer.className = 'flex-1 p-4 overflow-y-auto';
+      // Force READ ONLY mode on disconnect
+      this.mode = 'READ ONLY';
       // Remove any existing input container to prevent duplicates
       const existingContainer = document.getElementById('input-container');
       if (existingContainer) {
