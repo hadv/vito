@@ -1,21 +1,24 @@
-import { Controller, Post, Body, Param } from '@nestjs/common';
+import { Controller, Post, Body } from '@nestjs/common';
 import { SafeService } from './safe.service';
-import { CreateSafeTxDto } from './safe.dto';
 
 @Controller('safe')
 export class SafeController {
   constructor(private readonly safeService: SafeService) {}
 
-  @Post(':safeAddress/send')
-  async sendTransaction(
-    @Param('safeAddress') safeAddress: string,
-    @Body() txData: CreateSafeTxDto,
-    @Body('signerAddress') signerAddress: string,
-  ): Promise<any> {
+  @Post('send-transaction')
+  async sendSafeTransaction(
+    @Body('safeAddress') safeAddress: string,
+    @Body('to') to: string,
+    @Body('value') value: string,
+    @Body('data') data: string,
+    @Body('operation') operation: number,
+  ) {
     return this.safeService.sendSafeTransaction(
       safeAddress,
-      txData,
-      signerAddress,
+      to,
+      value,
+      data,
+      operation,
     );
   }
 }

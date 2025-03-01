@@ -1,6 +1,7 @@
 import QRCode from 'qrcode';
 import { io, Socket } from 'socket.io-client';
 import { ethers } from 'ethers';
+import { SignClient } from '@walletconnect/sign-client';
 
 class VimApp {
   private buffer: HTMLDivElement;
@@ -18,7 +19,9 @@ class VimApp {
   private safeAddress: string | null = null;
   private signerAddress: string | null = null;
   private socket: Socket;
-  private provider: ethers.BrowserProvider;
+  private provider: ethers.JsonRpcProvider;
+  private signClient: any; // WalletConnect SignClient instance
+  private sessionTopic: string | null = null; // Store the WalletConnect session topic
 
   constructor() {
     this.buffer = document.getElementById('buffer') as HTMLDivElement;
@@ -115,12 +118,32 @@ class VimApp {
     }
   }
 
-  private initSocketListeners(): void {
-    this.socket.on('connect', () => {
-      console.log('WebSocket connected');
-    });
+  private async connectWallet(safeAddress: string): Promise<void> {
+    try {
+      this.signClient = await SignClient.init({
+        projectId: import.meta.env.VITE_WALLET_CONNECT_PROJECT_ID || 'your_wallet_connect_project_id',
+        metadata: {
+          name: 'Vim Safe App',
+          description: 'A minimalist Safe app with Vim-like keybindings',
+          url: 'http://localhost:3000',
+          icons: ['https://walletconnect.com/walletconnect-logo.png'],
+        },
+      });
 
-    this.socket.on('walletUri', (data: { uri: string }) => {
+      const { uri, approval } = await this.signClient.connect({
+        requiredNamespaces: {
+          eip155: {
+            methods: ['eth_sign', 'personal_sign'],
+            chains: ['eip155:1'],
+            events: ['chainChanged', 'accountsChanged'],
+          },
+        },
+      });
+
+      if (!uri) {
+        throw new Error('Failed to generate WalletConnect URI');
+      }
+
       this.buffer.innerHTML = '';
       const text = document.createElement('p');
       text.textContent = 'Connect your wallet by scanning the QR code below:';
@@ -130,21 +153,54 @@ class VimApp {
       this.buffer.appendChild(text);
       this.buffer.appendChild(canvas);
 
-      QRCode.toCanvas(canvas, data.uri, { width: 300 }, (err) => {
+      await QRCode.toCanvas(canvas, uri, { width: 300 }, (err) => {
         if (err) {
           console.error('QR Code rendering error:', err);
           this.buffer.textContent = `Error generating QR code: ${err.message}`;
           this.buffer.className = 'flex-1 p-4 overflow-y-auto text-red-500';
         }
       });
-    });
 
-    this.socket.on('signerAddress', async (data: { address: string }) => {
-      this.signerAddress = data.address;
-      const ensName = await this.resolveEnsName(data.address);
-      this.buffer.textContent = `Connected: ${data.address}${ensName ? ` (${ensName})` : ''}`;
+      const session = await approval();
+      this.sessionTopic = session.topic; // Store the session topic
+      const address = session.namespaces.eip155.accounts[0].split(':')[2];
+      this.signerAddress = address;
+      const ensName = await this.resolveEnsName(address);
+      this.buffer.textContent = `Connected: ${address}${ensName ? ` (${ensName})` : ''}`;
       this.buffer.className = 'flex-1 p-4 overflow-y-auto text-green-400';
-      this.signerAddressDisplay.textContent = ensName ? `${ensName} (${data.address})` : data.address;
+      this.signerAddressDisplay.textContent = ensName ? `${ensName} (${address})` : address;
+    } catch (error) {
+      console.error('WalletConnect connection failed:', error);
+      this.buffer.textContent = `Error connecting wallet: ${error.message}`;
+      this.buffer.className = 'flex-1 p-4 overflow-y-auto text-red-500';
+    }
+  }
+
+  private async disconnectWallet(): Promise<void> {
+    if (this.signClient && this.sessionTopic) {
+      try {
+        await this.signClient.disconnect({
+          topic: this.sessionTopic,
+          reason: { code: 6000, message: 'User disconnected' },
+        });
+        this.signClient = null;
+        this.sessionTopic = null;
+        this.buffer.textContent = 'Wallet disconnected successfully';
+        this.buffer.className = 'flex-1 p-4 overflow-y-auto text-green-400';
+      } catch (error) {
+        console.error('WalletConnect disconnection failed:', error);
+        this.buffer.textContent = `Error disconnecting wallet: ${error.message}`;
+        this.buffer.className = 'flex-1 p-4 overflow-y-auto text-red-500';
+      }
+    } else {
+      this.buffer.textContent = 'No WalletConnect session to disconnect';
+      this.buffer.className = 'flex-1 p-4 overflow-y-auto text-yellow-400';
+    }
+  }
+
+  private initSocketListeners(): void {
+    this.socket.on('connect', () => {
+      console.log('WebSocket connected');
     });
 
     this.socket.on('safeInfo', async (data: { address: string; owners: string[]; threshold: number }) => {
@@ -299,7 +355,7 @@ class VimApp {
         this.buffer.className = 'flex-1 p-4 overflow-y-auto text-yellow-400';
         return;
       }
-      this.socket.emit('connectWallet', { safeAddress: this.safeAddress });
+      await this.connectWallet(this.safeAddress);
     } else if (this.command === ':dc') {
       if (!this.safeAddress) {
         this.buffer.textContent = 'Please connect a Safe address with :c first';
@@ -311,10 +367,9 @@ class VimApp {
         this.buffer.className = 'flex-1 p-4 overflow-y-auto text-yellow-400';
         return;
       }
+      await this.disconnectWallet();
       this.signerAddress = null;
       this.signerAddressDisplay.textContent = '';
-      this.buffer.textContent = 'Signer disconnected';
-      this.buffer.className = 'flex-1 p-4 overflow-y-auto text-green-400';
     } else if (this.command === ':q') {
       this.buffer.textContent = '';
       this.buffer.className = 'flex-1 p-4 overflow-y-auto';

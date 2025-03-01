@@ -15,27 +15,6 @@ export class SafeGateway {
     private readonly configService: ConfigService,
   ) {}
 
-  @SubscribeMessage('connectWallet')
-  async handleConnectWallet(client: any, data: { safeAddress: string }): Promise<void> {
-    if (!data || !data.safeAddress) {
-      this.server.emit('error', { message: 'Safe address required. Use :c first' });
-      return;
-    }
-    this.safeAddress = data.safeAddress;
-    const { uri, approval } = await this.safeService.connectWallet();
-    this.server.emit('walletUri', { uri });
-
-    approval()
-      .then((session) => {
-        const address = session.namespaces.eip155.accounts[0].split(':')[2];
-        this.server.emit('signerAddress', { address });
-      })
-      .catch((err) => {
-        console.error('WalletConnect approval failed:', err);
-        this.server.emit('error', { message: err.message });
-      });
-  }
-
   @SubscribeMessage('getSafeInfo')
   async handleGetSafeInfo(client: any, data: { safeAddress: string }): Promise<void> {
     if (!data || !data.safeAddress) {
