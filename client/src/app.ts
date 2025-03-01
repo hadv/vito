@@ -15,6 +15,7 @@ class VimApp {
   private safeAddress: string | null = null;
   private signerAddress: string | null = null;
   private socket: Socket;
+  private provider: ethers.BrowserProvider;
 
   constructor() {
     this.buffer = document.getElementById('buffer') as HTMLDivElement;
@@ -25,6 +26,10 @@ class VimApp {
     this.signerAddressDisplay = document.getElementById('signer-address-display') as HTMLSpanElement;
     this.commandInput = document.getElementById('command-input') as HTMLInputElement;
 
+    // Initialize Ethereum provider for ENS resolution
+    const alchemyApiKey = import.meta.env.VITE_ALCHEMY_API_KEY || 'your_alchemy_api_key_here';
+    this.provider = new ethers.JsonRpcProvider(`https://eth-mainnet.g.alchemy.com/v2/${alchemyApiKey}`);
+
     console.log('VITE_API_URL:', import.meta.env.VITE_API_URL);
 
     const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
@@ -34,6 +39,16 @@ class VimApp {
     this.initSocketListeners();
     this.initEventListeners();
     this.updateStatus();
+  }
+
+  private async resolveEnsName(address: string): Promise<string | null> {
+    try {
+      const ensName = await this.provider.lookupAddress(address);
+      return ensName;
+    } catch (error) {
+      console.error(`Failed to resolve ENS for ${address}:`, error);
+      return null;
+    }
   }
 
   private updateStatus(): void {
@@ -48,7 +63,7 @@ class VimApp {
     this.socket.on('walletUri', (data: { uri: string }) => {
       this.buffer.innerHTML = '';
       const text = document.createElement('p');
-      text.textContent = 'Connect your wallet by scanning the QR code below:'; // Updated message
+      text.textContent = 'Connect your wallet by scanning the QR code below:';
       text.className = 'text-center mb-2 text-gray-300';
       const canvas = document.createElement('canvas');
       canvas.className = 'mx-auto';
@@ -64,14 +79,15 @@ class VimApp {
       });
     });
 
-    this.socket.on('signerAddress', (data: { address: string }) => {
+    this.socket.on('signerAddress', async (data: { address: string }) => {
       this.signerAddress = data.address;
-      this.buffer.textContent = `Connected: ${this.signerAddress}`;
+      const ensName = await this.resolveEnsName(data.address);
+      this.buffer.textContent = `Connected: ${data.address}${ensName ? ` (${ensName})` : ''}`;
       this.buffer.className = 'flex-1 p-4 overflow-y-auto text-green-400';
-      this.signerAddressDisplay.textContent = this.signerAddress;
+      this.signerAddressDisplay.textContent = ensName ? `${ensName} (${data.address})` : data.address;
     });
 
-    this.socket.on('safeInfo', (data: { address: string; owners: string[]; threshold: number }) => {
+    this.socket.on('safeInfo', async (data: { address: string; owners: string[]; threshold: number }) => {
       this.buffer.innerHTML = '';
 
       // Owners Box
@@ -84,12 +100,13 @@ class VimApp {
 
       const ownersList = document.createElement('ul');
       ownersList.className = 'mb-4';
-      data.owners.forEach((owner: string) => {
+      for (const owner of data.owners) {
+        const ensName = await this.resolveEnsName(owner);
         const ownerItem = document.createElement('li');
         ownerItem.className = 'text-gray-300';
-        ownerItem.textContent = owner;
+        ownerItem.textContent = ensName ? `${owner} (${ensName})` : owner;
         ownersList.appendChild(ownerItem);
-      });
+      }
 
       ownersBox.appendChild(ownersLabel);
       ownersBox.appendChild(ownersList);
@@ -183,13 +200,15 @@ class VimApp {
         return;
       }
       this.safeAddress = safeAddress;
+      // Resolve ENS for the Safe address
+      const ensName = await this.resolveEnsName(safeAddress);
       // Remove the existing input container if it exists
       if (this.inputContainer) {
         this.inputContainer.remove();
         this.inputContainer = null;
         this.safeAddressInput = null;
       }
-      this.safeAddressDisplay.textContent = this.safeAddress;
+      this.safeAddressDisplay.textContent = ensName ? `${ensName} (${safeAddress})` : safeAddress;
       this.buffer.textContent = '';
       this.buffer.className = 'flex-1 p-4 overflow-y-auto';
     } else if (this.command === ':i') {
