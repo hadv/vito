@@ -8,13 +8,20 @@ export class SafeGateway {
   @WebSocketServer()
   server: Server;
 
+  private safeAddress: string | null = null;
+
   constructor(
     private readonly safeService: SafeService,
     private readonly configService: ConfigService,
   ) {}
 
   @SubscribeMessage('connectWallet')
-  async handleConnectWallet(): Promise<void> {
+  async handleConnectWallet(client: any, data: { safeAddress: string }): Promise<void> {
+    if (!data || !data.safeAddress) {
+      this.server.emit('error', { message: 'Safe address required. Use :c first' });
+      return;
+    }
+    this.safeAddress = data.safeAddress;
     const { uri, approval } = await this.safeService.connectWallet();
     this.server.emit('walletUri', { uri });
 
@@ -30,18 +37,19 @@ export class SafeGateway {
   }
 
   @SubscribeMessage('getSafeInfo')
-  async handleGetSafeInfo(): Promise<void> {
-    const safeAddress = this.configService.get<string>('SAFE_ADDRESS');
-    console.log('SAFE_ADDRESS from env:', safeAddress); // Debug log
-    if (!safeAddress) {
-      this.server.emit('error', { message: 'Safe address not configured in environment variables' });
+  async handleGetSafeInfo(client: any, data: { safeAddress: string }): Promise<void> {
+    if (!data || !data.safeAddress) {
+      this.server.emit('error', { message: 'Safe address required. Use :c first' });
       return;
     }
     try {
-      const safeInfo = await this.safeService.getSafeInfo(safeAddress);
+      const safeInfo = await this.safeService.getSafeInfo(data.safeAddress);
       this.server.emit('safeInfo', safeInfo);
     } catch (err) {
-      this.server.emit('error', { message: err.message });
+      const errorMessage = err.message.includes('call revert exception')
+        ? `Invalid Safe address: ${data.safeAddress}`
+        : `Failed to fetch Safe info: ${err.message}`;
+      this.server.emit('error', { message: errorMessage });
     }
   }
 }
