@@ -1,0 +1,19 @@
+{
+  "name": "client",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "typescript": "~5.7.2",
+    "vite": "^6.2.0"
+  },
+  "dependencies": {
+    "qrcode": "^1.5.4",
+    "socket.io-client": "^4.8.1"
+  }
+}

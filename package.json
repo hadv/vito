@@ -1,0 +1,10 @@
+{
+  "name": "vim-safe-app",
+  "private": true,
+  "scripts": {
+    "start:client": "cd client && npm run dev",
+    "start:server": "cd server && npm run start:dev",
+    "start": "npm run start:server & npm run start:client",
+    "install:all": "cd client && npm install && cd ../server && npm install"
+  }
+}
