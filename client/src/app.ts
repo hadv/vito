@@ -427,6 +427,27 @@ class VimApp {
     });
 
     this.socket.on('safeInfo', async (data: { address: string; owners: string[]; threshold: number }) => {
+      // If this is a response to the 'e' key press (mode switch attempt)
+      if (this.mode === 'READ ONLY' && this.signerAddress) {
+        const isOwner = data.owners.map(owner => owner.toLowerCase())
+          .includes(this.signerAddress!.toLowerCase());
+        
+        // Clear buffer before showing any message
+        this.buffer.innerHTML = '';
+        
+        if (isOwner) {
+          this.mode = 'TX';
+          console.log('Switched to TX mode');
+        } else {
+          console.log('Cannot switch to TX mode: wallet is not an owner');
+          this.buffer.textContent = 'Only Safe owners can access TX mode';
+          this.buffer.className = 'flex-1 p-4 overflow-y-auto text-yellow-400';
+        }
+        this.updateStatus();
+        return;
+      }
+
+      // Regular safeInfo display
       this.buffer.innerHTML = '';
 
       // Owners Box
@@ -539,14 +560,27 @@ class VimApp {
       this.command = ':';
       console.log('Started command mode');
     } else if (e.key === 'e' && !this.command && this.mode === 'READ ONLY') {
-      // Only allow TX mode if wallet is connected
-      if (this.signerAddress) {
-        this.mode = 'TX';
-        console.log('Switched to TX mode');
-      } else {
+      // Only allow TX mode if wallet is connected and is an owner
+      if (this.signerAddress && this.safeAddress) {
+        // Clear buffer before checking ownership
+        this.buffer.innerHTML = '';
+        
+        // Use getSafeInfo to check ownership
+        this.socket.emit('getSafeInfo', { safeAddress: this.safeAddress });
+      } else if (!this.signerAddress) {
+        // Clear buffer before showing error
+        this.buffer.innerHTML = '';
         console.log('Cannot switch to TX mode: wallet not connected');
         this.buffer.textContent = 'Please connect wallet first using :wc command';
         this.buffer.className = 'flex-1 p-4 overflow-y-auto text-yellow-400';
+        this.updateStatus();
+      } else {
+        // Clear buffer before showing error
+        this.buffer.innerHTML = '';
+        console.log('Cannot switch to TX mode: no Safe connected');
+        this.buffer.textContent = 'Please connect a Safe address with :c first';
+        this.buffer.className = 'flex-1 p-4 overflow-y-auto text-yellow-400';
+        this.updateStatus();
       }
     } else if (e.key === 'Escape') {
       if (this.command) {
