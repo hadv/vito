@@ -5,7 +5,10 @@ import { SafeModule } from './safe/safe.module';
 
 @Module({
   imports: [
-    ConfigModule.forRoot({ envFilePath: '.env', isGlobal: true }),
+    ConfigModule.forRoot({
+      envFilePath: '.env', // Explicitly specify .env file
+      isGlobal: true, // Make env vars globally available
+    }),
     HttpModule,
     SafeModule,
   ],

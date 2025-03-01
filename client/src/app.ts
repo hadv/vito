@@ -4,7 +4,7 @@ import { io, Socket } from 'socket.io-client';
 class VimApp {
   private buffer: HTMLDivElement;
   private statusBar: HTMLDivElement;
-  private mode: 'NORMAL' | 'INSERT' | 'VISUAL' = 'NORMAL';
+  private mode: 'NORMAL' = 'NORMAL'; // Only NORMAL mode
   private command: string = '';
   private safeAddress: string;
   private signerAddress: string | null = null;
@@ -28,8 +28,7 @@ class VimApp {
   }
 
   private updateStatus(): void {
-    this.statusBar.textContent =
-      this.mode === 'NORMAL' && this.command ? `:${this.command}` : `-- ${this.mode} --`;
+    this.statusBar.textContent = this.command ? `:${this.command}` : '-- NORMAL --';
   }
 
   private initSocketListeners(): void {
@@ -62,6 +61,19 @@ class VimApp {
       this.buffer.className = 'flex-1 p-4 overflow-y-auto text-green-400';
     });
 
+    this.socket.on('safeInfo', (data: { address: string; owners: string[]; threshold: number }) => {
+      this.buffer.innerHTML = '';
+      const info = document.createElement('div');
+      info.className = 'text-gray-300';
+      info.innerHTML = `
+        <p><span class="font-bold text-blue-400">Safe Address:</span> ${data.address}</p>
+        <p><span class="font-bold text-blue-400">Owners:</span> ${data.owners.join(', ')}</p>
+        <p><span class="font-bold text-blue-400">Threshold:</span> ${data.threshold}</p>
+      `;
+      this.buffer.appendChild(info);
+      this.buffer.className = 'flex-1 p-4 overflow-y-auto';
+    });
+
     this.socket.on('error', (data: { message: string }) => {
       this.buffer.textContent = `Error: ${data.message}`;
       this.buffer.className = 'flex-1 p-4 overflow-y-auto text-red-500';
@@ -76,35 +88,22 @@ class VimApp {
 
   private initEventListeners(): void {
     document.addEventListener('keydown', async (e: KeyboardEvent) => {
-      if (this.mode === 'NORMAL') {
-        await this.handleNormalMode(e);
-      } else if (this.mode === 'INSERT' && e.key === 'Escape') {
-        this.mode = 'NORMAL';
-        this.buffer.blur();
-        e.preventDefault();
-        this.updateStatus();
-      }
+      await this.handleNormalMode(e);
     });
   }
 
   private async handleNormalMode(e: KeyboardEvent): Promise<void> {
-    switch (e.key) {
-      case 'i':
-        this.mode = 'INSERT';
-        this.buffer.focus();
-        break;
-      case ':':
-        this.command = ':';
-        break;
-      default:
-        if (this.command.startsWith(':')) {
-          if (e.key === 'Enter') {
-            await this.executeCommand();
-            this.command = '';
-          } else if (e.key.length === 1) {
-            this.command += e.key;
-          }
-        }
+    if (e.key === ':') {
+      this.command = ':';
+    } else if (this.command.startsWith(':')) {
+      if (e.key === 'Enter') {
+        await this.executeCommand();
+        this.command = '';
+      } else if (e.key === 'Backspace') {
+        this.command = this.command.slice(0, -1);
+      } else if (e.key.length === 1) {
+        this.command += e.key;
+      }
     }
     e.preventDefault();
     this.updateStatus();
@@ -140,6 +139,13 @@ class VimApp {
         this.buffer.textContent = `Error: ${error.message}`;
         this.buffer.className = 'flex-1 p-4 overflow-y-auto text-red-500';
       }
+    } else if (this.command === ':info') {
+      if (!this.signerAddress) {
+        this.buffer.textContent = 'Please connect wallet first with :walletconnect';
+        this.buffer.className = 'flex-1 p-4 overflow-y-auto text-yellow-400';
+        return;
+      }
+      this.socket.emit('getSafeInfo');
     } else if (this.command === ':q') {
       this.buffer.textContent = '';
     }

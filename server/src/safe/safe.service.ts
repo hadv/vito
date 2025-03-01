@@ -8,12 +8,16 @@ import { CreateSafeTxDto } from './safe.dto';
 
 @Injectable()
 export class SafeService {
-  private wcClient: any; // Type inference from SignClient.init
+  private wcClient: any;
+  private provider: ethers.JsonRpcProvider;
 
   constructor(
     private readonly httpService: HttpService,
     private readonly configService: ConfigService,
   ) {
+    const rpcUrl = this.configService.get<string>('RPC_URL');
+    if (!rpcUrl) throw new Error('RPC_URL not configured in environment variables');
+    this.provider = new ethers.JsonRpcProvider(rpcUrl);
     this.initWalletConnect();
   }
 
@@ -42,15 +46,39 @@ export class SafeService {
     return { uri, approval };
   }
 
-  async sendSafeTransaction(safeAddress: string, txData: CreateSafeTxDto, signerAddress: string): Promise<any> {
-    const provider = new ethers.JsonRpcProvider(
-      `https://mainnet.infura.io/v3/${this.configService.get<string>('INFURA_KEY')}`,
-    );
+  async getSafeInfo(safeAddress: string): Promise<any> {
+    console.log('Fetching Safe info via RPC for:', safeAddress);
+    try {
+      const safeAbi = [
+        'function getOwners() view returns (address[] memory)',
+        'function getThreshold() view returns (uint256)',
+        'function nonce() view returns (uint256)',
+      ];
+      const safeContract = new ethers.Contract(safeAddress, safeAbi, this.provider);
 
-    const nonceResponse = await firstValueFrom(
-      this.httpService.get(`https://safe-transaction-mainnet.safe.global/api/v1/safes/${safeAddress}`),
-    );
-    const nonce = nonceResponse.data.nonce;
+      const owners = await safeContract.getOwners();
+      const threshold = await safeContract.getThreshold();
+
+      const safeInfo = {
+        address: safeAddress,
+        owners: owners.map((owner: string) => owner.toLowerCase()),
+        threshold: Number(threshold),
+      };
+
+      console.log('Safe RPC response:', safeInfo);
+      return safeInfo;
+    } catch (error) {
+      console.error('Safe RPC error:', error.message);
+      throw error;
+    }
+  }
+
+  async sendSafeTransaction(safeAddress: string, txData: CreateSafeTxDto, signerAddress: string): Promise<any> {
+    const safeAbi = [
+      'function nonce() view returns (uint256)',
+    ];
+    const safeContract = new ethers.Contract(safeAddress, safeAbi, this.provider);
+    const nonce = await safeContract.nonce();
 
     const safeTx = {
       to: txData.to,
@@ -62,7 +90,7 @@ export class SafeService {
       gasPrice: 0,
       gasToken: '0x0000000000000000000000000000000000000000',
       refundReceiver: '0x0000000000000000000000000000000000000000',
-      nonce,
+      nonce: Number(nonce),
     };
 
     const domain = {
