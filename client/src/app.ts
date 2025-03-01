@@ -51,6 +51,14 @@ class VimApp {
 
     // Show help guide on initial screen
     this.showHelpGuide();
+
+    if (this.safeAddressInput) {
+      this.safeAddressInput.addEventListener('paste', (e) => {
+        setTimeout(() => {
+          this.commandInput.focus();
+        }, 10);
+      });
+    }
   }
 
   private async resolveEnsName(address: string): Promise<string | null> {
@@ -551,6 +559,14 @@ class VimApp {
         console.log('Clicked on interactive element:', target.tagName);
       }
     });
+
+    if (this.safeAddressInput) {
+      this.safeAddressInput.addEventListener('paste', (e) => {
+        setTimeout(() => {
+          this.commandInput.focus();
+        }, 10);
+      });
+    }
   }
 
   private async handleNormalMode(e: KeyboardEvent): Promise<void> {
@@ -712,14 +728,22 @@ class VimApp {
       newContainer.id = 'input-container';
       newContainer.className = 'flex-1 p-4';
       newContainer.innerHTML = `
-        <div class="bg-gray-800 p-6 rounded-lg border border-gray-700 w-full max-w-2xl">
-          <label for="safe-address-input" class="text-gray-400 text-sm mb-2 block">Safe Account</label>
-          <div class="relative w-full">
-            <span class="absolute left-0 top-0 h-10 w-10 bg-gray-600 rounded-l-full flex items-center justify-center">
-              <div class="w-6 h-6 bg-gray-500 rounded-full"></div>
-            </span>
-            <input id="safe-address-input" class="bg-gray-800 text-gray-200 pl-12 pr-4 py-2 rounded-l-full rounded-r-none focus:outline-none focus:ring-2 focus:ring-blue-400 w-full placeholder-gray-400 border border-gray-600" placeholder="" />
+        <div class="relative">
+          <div class="absolute inset-y-0 left-0 flex items-center pl-3.5 pointer-events-none">
+            <div class="w-8 h-8 bg-gray-600 rounded-full"></div>
           </div>
+          <input 
+            type="text" 
+            id="safe-address-input" 
+            class="block pl-14 pr-2.5 py-4 w-full text-white bg-[#2c2c2c] rounded-lg border border-gray-700 appearance-none focus:outline-none focus:ring-0 focus:border-blue-600 peer" 
+            placeholder=" "
+          />
+          <label 
+            for="safe-address-input" 
+            class="absolute text-sm text-gray-400 duration-300 transform -translate-y-4 scale-75 top-2 z-10 origin-[0] bg-[#2c2c2c] px-2 peer-focus:px-2 peer-focus:text-blue-600 left-1"
+          >
+            Safe Account
+          </label>
         </div>
       `;
       
@@ -738,6 +762,14 @@ class VimApp {
       
       // Show help guide again
       this.showHelpGuide();
+
+      if (this.safeAddressInput) {
+        this.safeAddressInput.addEventListener('paste', (e) => {
+          setTimeout(() => {
+            this.commandInput.focus();
+          }, 10);
+        });
+      }
     } else {
       this.buffer.textContent = `Unknown command: ${this.command}`;
       this.buffer.className = 'flex-1 p-4 overflow-y-auto text-yellow-400';
