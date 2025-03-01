@@ -130,6 +130,9 @@ class VimApp {
         },
       });
 
+      // Set up WalletConnect event listeners
+      this.setupWalletConnectListeners();
+
       const { uri, approval } = await this.signClient.connect({
         requiredNamespaces: {
           eip155: {
@@ -153,6 +156,76 @@ class VimApp {
       this.buffer.appendChild(text);
       this.buffer.appendChild(canvas);
 
+      // Create an elegant pairing code container
+      const uriContainer = document.createElement('div');
+      uriContainer.className = 'mt-4 mx-auto max-w-md bg-gray-800 rounded-lg border border-gray-700 overflow-hidden shadow-lg';
+      
+      const uriHeader = document.createElement('div');
+      uriHeader.className = 'bg-gray-700 px-4 py-2 text-gray-300 text-sm font-medium';
+      uriHeader.textContent = 'Or use pairing code';
+      
+      const uriBody = document.createElement('div');
+      uriBody.className = 'p-3 flex items-center gap-2';
+      
+      const uriInput = document.createElement('input');
+      uriInput.readOnly = true;
+      uriInput.value = uri;
+      uriInput.className = 'bg-gray-900 text-gray-300 px-3 py-2 rounded flex-grow font-mono text-xs border border-gray-700 hover:border-gray-600 focus:border-blue-500 outline-none';
+      
+      const copyButton = document.createElement('button');
+      copyButton.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" /></svg>';
+      copyButton.className = 'bg-blue-600 hover:bg-blue-700 text-white p-2 rounded-md flex items-center justify-center transition-colors duration-150';
+      copyButton.title = 'Copy to clipboard';
+      copyButton.type = 'button';
+      
+      copyButton.onclick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        
+        navigator.clipboard.writeText(uri)
+          .then(() => {
+            // Change button to show success state
+            copyButton.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>';
+            copyButton.classList.remove('bg-blue-600', 'hover:bg-blue-700');
+            copyButton.classList.add('bg-green-600', 'hover:bg-green-700');
+            
+            setTimeout(() => {
+              // Revert button to original state
+              copyButton.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" /></svg>';
+              copyButton.classList.remove('bg-green-600', 'hover:bg-green-700');
+              copyButton.classList.add('bg-blue-600', 'hover:bg-blue-700');
+            }, 2000);
+            
+            // Return focus to command input
+            setTimeout(() => {
+              this.commandInput.focus();
+            }, 100);
+          })
+          .catch(err => {
+            console.error('Failed to copy: ', err);
+            setTimeout(() => {
+              this.commandInput.focus();
+            }, 100);
+          });
+      };
+      
+      // Add click handler to input for better UX
+      uriInput.onclick = (e) => {
+        e.preventDefault();
+        uriInput.select();
+        setTimeout(() => {
+          this.commandInput.focus();
+        }, 100);
+      };
+      
+      uriBody.appendChild(uriInput);
+      uriBody.appendChild(copyButton);
+      
+      uriContainer.appendChild(uriHeader);
+      uriContainer.appendChild(uriBody);
+      
+      this.buffer.appendChild(uriContainer);
+
       await QRCode.toCanvas(canvas, uri, { width: 300 }, (err) => {
         if (err) {
           console.error('QR Code rendering error:', err);
@@ -161,19 +234,135 @@ class VimApp {
         }
       });
 
-      const session = await approval();
-      this.sessionTopic = session.topic; // Store the session topic
-      const address = session.namespaces.eip155.accounts[0].split(':')[2];
-      this.signerAddress = address;
-      const ensName = await this.resolveEnsName(address);
-      this.buffer.textContent = `Connected: ${address}${ensName ? ` (${ensName})` : ''}`;
-      this.buffer.className = 'flex-1 p-4 overflow-y-auto text-green-400';
-      this.signerAddressDisplay.textContent = ensName ? `${ensName} (${address})` : address;
+      try {
+        const session = await approval();
+        this.sessionTopic = session.topic; // Store the session topic
+        const address = session.namespaces.eip155.accounts[0].split(':')[2];
+        this.signerAddress = address;
+        const ensName = await this.resolveEnsName(address);
+        
+        // Clear the buffer and show success message
+        this.buffer.innerHTML = '';
+        const successMessage = document.createElement('p');
+        successMessage.textContent = `Connected: ${address}${ensName ? ` (${ensName})` : ''}`;
+        successMessage.className = 'text-green-400';
+        this.buffer.appendChild(successMessage);
+        this.buffer.className = 'flex-1 p-4 overflow-y-auto';
+        
+        this.signerAddressDisplay.textContent = ensName ? `${ensName} (${address})` : address;
+        
+        // Reset command state and focus the command input
+        this.command = '';
+        this.updateStatus();
+        
+        // Ensure the command input is properly reset and focused
+        this.commandInput.value = '';
+        this.commandInput.blur();
+        setTimeout(() => {
+          this.commandInput.focus();
+          console.log('Command input focused after connection');
+        }, 100);
+      } catch (error) {
+        console.error('WalletConnect session approval failed:', error);
+        this.buffer.textContent = `Error establishing session: ${error.message}`;
+        this.buffer.className = 'flex-1 p-4 overflow-y-auto text-red-500';
+        
+        // Reset command state
+        this.command = '';
+        this.updateStatus();
+        this.commandInput.value = '';
+        this.commandInput.blur();
+        setTimeout(() => this.commandInput.focus(), 100);
+      }
     } catch (error) {
       console.error('WalletConnect connection failed:', error);
       this.buffer.textContent = `Error connecting wallet: ${error.message}`;
       this.buffer.className = 'flex-1 p-4 overflow-y-auto text-red-500';
+      
+      // Reset command state
+      this.command = '';
+      this.updateStatus();
+      this.commandInput.value = '';
+      this.commandInput.blur();
+      setTimeout(() => this.commandInput.focus(), 100);
     }
+  }
+
+  private setupWalletConnectListeners(): void {
+    if (!this.signClient) return;
+    
+    // Listen for session deletion events (disconnections)
+    this.signClient.on('session_delete', ({ id, topic }: { id: number, topic: string }) => {
+      console.log(`WalletConnect session deleted: ${topic}`);
+      
+      // Only handle if it's our current session
+      if (this.sessionTopic === topic) {
+        this.handleWalletDisconnect();
+      }
+    });
+    
+    // Listen for session expiration events
+    this.signClient.on('session_expire', ({ id, topic }: { id: number, topic: string }) => {
+      console.log(`WalletConnect session expired: ${topic}`);
+      
+      // Only handle if it's our current session
+      if (this.sessionTopic === topic) {
+        this.handleWalletDisconnect();
+      }
+    });
+    
+    // Listen for connection events
+    this.signClient.on('session_event', (event: any) => {
+      console.log('WalletConnect session event:', event);
+      
+      // Handle specific events like accountsChanged if needed
+      if (event.name === 'accountsChanged' && this.sessionTopic === event.topic) {
+        // Update connected account if it changed
+        if (event.data && event.data.length > 0) {
+          const newAddress = event.data[0].split(':')[2];
+          if (newAddress !== this.signerAddress) {
+            this.signerAddress = newAddress;
+            this.updateSignerDisplay();
+          }
+        } else {
+          // Account disconnected/switched to none
+          this.handleWalletDisconnect();
+        }
+      }
+    });
+  }
+  
+  private async updateSignerDisplay(): Promise<void> {
+    if (this.signerAddress) {
+      const ensName = await this.resolveEnsName(this.signerAddress);
+      this.signerAddressDisplay.textContent = ensName 
+        ? `${ensName} (${this.signerAddress})` 
+        : this.signerAddress;
+    } else {
+      this.signerAddressDisplay.textContent = '';
+    }
+  }
+  
+  private handleWalletDisconnect(): void {
+    // Clear the WalletConnect session state
+    this.sessionTopic = null;
+    this.signerAddress = null;
+    
+    // Update the UI
+    this.signerAddressDisplay.textContent = '';
+    
+    // Display a message to the user
+    this.buffer.innerHTML = '';
+    const disconnectMessage = document.createElement('p');
+    disconnectMessage.textContent = 'Wallet disconnected';
+    disconnectMessage.className = 'text-yellow-400';
+    this.buffer.appendChild(disconnectMessage);
+    this.buffer.className = 'flex-1 p-4 overflow-y-auto';
+    
+    // Ensure command input is focused
+    setTimeout(() => {
+      this.commandInput.focus();
+    }, 100);
   }
 
   private async disconnectWallet(): Promise<void> {
@@ -183,10 +372,16 @@ class VimApp {
           topic: this.sessionTopic,
           reason: { code: 6000, message: 'User disconnected' },
         });
-        this.signClient = null;
-        this.sessionTopic = null;
-        this.buffer.textContent = 'Wallet disconnected successfully';
-        this.buffer.className = 'flex-1 p-4 overflow-y-auto text-green-400';
+        
+        // Handle the disconnect state
+        this.handleWalletDisconnect();
+        
+        // Add a success message
+        this.buffer.innerHTML = '';
+        const successMessage = document.createElement('p');
+        successMessage.textContent = 'Wallet disconnected successfully';
+        successMessage.className = 'text-green-400';
+        this.buffer.appendChild(successMessage);
       } catch (error) {
         console.error('WalletConnect disconnection failed:', error);
         this.buffer.textContent = `Error disconnecting wallet: ${error.message}`;
@@ -261,6 +456,11 @@ class VimApp {
   }
 
   private initEventListeners(): void {
+    // Remove any existing listeners to prevent duplicates
+    const newCommandInput = this.commandInput.cloneNode(true);
+    this.commandInput.parentNode?.replaceChild(newCommandInput, this.commandInput);
+    this.commandInput = newCommandInput as HTMLInputElement;
+    
     this.commandInput.addEventListener('keydown', async (e: KeyboardEvent) => {
       console.log('Keydown:', e.key);
       await this.handleNormalMode(e);
@@ -281,17 +481,38 @@ class VimApp {
     });
 
     document.addEventListener('click', (e) => {
-      if (this.inputContainer && this.safeAddressInput && e.target !== this.safeAddressInput) {
-        this.commandInput.focus();
+      // Get the clicked element
+      const target = e.target as Element;
+      
+      // Check if the click is on an interactive element that should handle its own focus
+      const isInteractiveElement = 
+        target.tagName === 'BUTTON' || 
+        target.tagName === 'INPUT' || 
+        target.tagName === 'A' ||
+        target.tagName === 'SELECT' ||
+        target.tagName === 'TEXTAREA';
+        
+      // If we're not clicking on an interactive element, focus the command input
+      if (!isInteractiveElement) {
+        console.log('Clicked on non-interactive element, focusing command input');
+        setTimeout(() => {
+          this.commandInput.focus();
+        }, 10);
+      } else {
+        console.log('Clicked on interactive element:', target.tagName);
       }
     });
   }
 
   private async handleNormalMode(e: KeyboardEvent): Promise<void> {
+    console.log('Handling normal mode key:', e.key, 'Current command:', this.command);
+    
     if (e.key === ':') {
       this.command = ':';
+      console.log('Started command mode');
     } else if (this.command.startsWith(':')) {
       if (e.key === 'Enter') {
+        console.log('Executing command:', this.command);
         await this.executeCommand();
         this.command = '';
       } else if (e.key === 'Backspace') {
