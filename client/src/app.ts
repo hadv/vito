@@ -677,20 +677,37 @@ class VimApp {
     } else if (this.command === ':h') {
       this.showHelpGuide();
     } else if (this.command === ':d') {
+      // First disconnect wallet if connected (like :dc command)
+      if (this.signerAddress && this.signClient && this.sessionTopic) {
+        try {
+          await this.signClient.disconnect({
+            topic: this.sessionTopic,
+            reason: { code: 6000, message: 'User disconnected' },
+          });
+        } catch (error) {
+          console.error('WalletConnect disconnection failed:', error);
+        }
+      }
+      
+      // Reset all states
       this.safeAddress = null;
       this.signerAddress = null;
+      this.sessionTopic = null;
       this.safeAddressDisplay.textContent = '';
       this.signerAddressDisplay.textContent = '';
       this.buffer.textContent = '';
       this.buffer.className = 'flex-1 p-4 overflow-y-auto';
-      // Force READ ONLY mode on disconnect
+      
+      // Force READ ONLY mode
       this.mode = 'READ ONLY';
-      // Remove any existing input container to prevent duplicates
+      
+      // Remove existing input container
       const existingContainer = document.getElementById('input-container');
       if (existingContainer) {
         existingContainer.remove();
       }
-      // Re-add the input container with the same layout as initial screen
+
+      // Re-add the input container for new Safe connection
       const newContainer = document.createElement('div');
       newContainer.id = 'input-container';
       newContainer.className = 'flex-1 p-4';
@@ -705,17 +722,21 @@ class VimApp {
           </div>
         </div>
       `;
+      
       const mainContentDiv = document.getElementById('main-content') as HTMLDivElement;
       mainContentDiv.insertBefore(newContainer, document.getElementById('help-container'));
+      
       // Re-initialize references
       this.inputContainer = document.getElementById('input-container') as HTMLDivElement;
       this.safeAddressInput = document.getElementById('safe-address-input') as HTMLInputElement;
       this.safeAddressInput.value = '';
+      
       // Show main-content and adjust layout
       this.mainContent.classList.remove('hidden');
       this.buffer.classList.remove('hidden');
       this.helpScreen.classList.add('hidden');
-      // Show help guide again after :d
+      
+      // Show help guide again
       this.showHelpGuide();
     } else {
       this.buffer.textContent = `Unknown command: ${this.command}`;
