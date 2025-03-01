@@ -6,6 +6,9 @@ class VimApp {
   private buffer: HTMLDivElement;
   private statusBar: HTMLDivElement;
   private inputContainer: HTMLDivElement | null;
+  private helpContainer: HTMLDivElement;
+  private helpScreen: HTMLDivElement;
+  private mainContent: HTMLDivElement;
   private safeAddressInput: HTMLInputElement | null;
   private safeAddressDisplay: HTMLSpanElement;
   private signerAddressDisplay: HTMLSpanElement;
@@ -21,6 +24,9 @@ class VimApp {
     this.buffer = document.getElementById('buffer') as HTMLDivElement;
     this.statusBar = document.getElementById('status-bar') as HTMLDivElement;
     this.inputContainer = document.getElementById('input-container') as HTMLDivElement;
+    this.helpContainer = document.getElementById('help-container') as HTMLDivElement;
+    this.helpScreen = document.getElementById('help-screen') as HTMLDivElement;
+    this.mainContent = document.getElementById('main-content') as HTMLDivElement;
     this.safeAddressInput = document.getElementById('safe-address-input') as HTMLInputElement;
     this.safeAddressDisplay = document.getElementById('safe-address-display') as HTMLSpanElement;
     this.signerAddressDisplay = document.getElementById('signer-address-display') as HTMLSpanElement;
@@ -39,6 +45,9 @@ class VimApp {
     this.initSocketListeners();
     this.initEventListeners();
     this.updateStatus();
+
+    // Show help guide on initial screen
+    this.showHelpGuide();
   }
 
   private async resolveEnsName(address: string): Promise<string | null> {
@@ -53,6 +62,57 @@ class VimApp {
 
   private updateStatus(): void {
     this.statusBar.textContent = this.command ? `:${this.command}` : '-- NORMAL --';
+  }
+
+  private showHelpGuide(): void {
+    this.helpContainer.innerHTML = '';
+    this.helpScreen.innerHTML = '';
+
+    // Help Box
+    const helpBox = document.createElement('div');
+    helpBox.className = 'bg-gray-800 p-6 rounded-lg border border-gray-700 w-full max-w-2xl shadow-lg';
+
+    const helpTitle = document.createElement('h3');
+    helpTitle.className = 'text-blue-400 font-bold mb-4';
+    helpTitle.textContent = 'Help & Usage Guide';
+
+    const commandsList = document.createElement('ul');
+    commandsList.className = 'text-gray-300';
+
+    const commands = [
+      { cmd: ':c', desc: 'Connect a Safe wallet by entering its address in the input field.' },
+      { cmd: ':i', desc: 'Display information about the connected Safe wallet (requires :c first).' },
+      { cmd: ':wc', desc: 'Connect a signer wallet via WalletConnect to interact with the Safe (requires :c first).' },
+      { cmd: ':dc', desc: 'Disconnect the current signer wallet (requires :wc first).' },
+      { cmd: ':q', desc: 'Clear the buffer screen.' },
+      { cmd: ':d', desc: 'Disconnect the Safe wallet and return to the input screen to connect a new Safe.' },
+      { cmd: ':h', desc: 'Show this help guide with usage instructions for all commands.' },
+    ];
+
+    commands.forEach(({ cmd, desc }) => {
+      const commandItem = document.createElement('li');
+      commandItem.className = 'mb-2';
+      commandItem.innerHTML = `<span class="text-blue-400 font-semibold">${cmd}</span> - ${desc}`;
+      commandsList.appendChild(commandItem);
+    });
+
+    helpBox.appendChild(helpTitle);
+    helpBox.appendChild(commandsList);
+
+    if (this.inputContainer) {
+      // If input field is visible, show help in help-container
+      this.helpContainer.appendChild(helpBox);
+      this.helpContainer.classList.remove('hidden');
+      this.mainContent.classList.remove('hidden');
+      this.buffer.classList.remove('hidden');
+      this.helpScreen.classList.add('hidden');
+    } else {
+      // If input field is not visible, show help in help-screen
+      this.helpScreen.appendChild(helpBox);
+      this.helpScreen.classList.remove('hidden');
+      this.mainContent.classList.add('hidden');
+      this.buffer.classList.add('hidden');
+    }
   }
 
   private initSocketListeners(): void {
@@ -192,6 +252,16 @@ class VimApp {
     const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
     this.buffer.className = 'flex-1 p-4 overflow-y-auto';
 
+    // Clear the help screen and buffer before executing any command
+    // But preserve help container if input field is visible (before :c)
+    if (!this.inputContainer) {
+      this.helpContainer.innerHTML = '';
+      this.helpContainer.classList.add('hidden');
+    }
+    this.helpScreen.innerHTML = '';
+    this.helpScreen.classList.add('hidden');
+    this.buffer.innerHTML = '';
+
     if (this.command === ':c') {
       const safeAddress = this.safeAddressInput!.value.trim();
       if (!ethers.isAddress(safeAddress)) {
@@ -211,6 +281,11 @@ class VimApp {
       this.safeAddressDisplay.textContent = ensName ? `${ensName} (${safeAddress})` : safeAddress;
       this.buffer.textContent = '';
       this.buffer.className = 'flex-1 p-4 overflow-y-auto';
+      // Adjust layout: hide main-content and help-screen, show buffer full-width
+      this.mainContent.classList.add('hidden');
+      this.helpContainer.innerHTML = '';
+      this.helpContainer.classList.add('hidden');
+      this.buffer.classList.remove('hidden');
     } else if (this.command === ':i') {
       if (!this.safeAddress) {
         this.buffer.textContent = 'Please connect a Safe address with :c first';
@@ -243,6 +318,8 @@ class VimApp {
     } else if (this.command === ':q') {
       this.buffer.textContent = '';
       this.buffer.className = 'flex-1 p-4 overflow-y-auto';
+    } else if (this.command === ':h') {
+      this.showHelpGuide();
     } else if (this.command === ':d') {
       this.safeAddress = null;
       this.signerAddress = null;
@@ -270,12 +347,18 @@ class VimApp {
           </div>
         </div>
       `;
-      const appDiv = document.getElementById('app') as HTMLDivElement;
-      appDiv.insertBefore(newContainer, document.getElementById('command-input'));
+      const mainContentDiv = document.getElementById('main-content') as HTMLDivElement;
+      mainContentDiv.insertBefore(newContainer, document.getElementById('help-container'));
       // Re-initialize references
       this.inputContainer = document.getElementById('input-container') as HTMLDivElement;
       this.safeAddressInput = document.getElementById('safe-address-input') as HTMLInputElement;
       this.safeAddressInput.value = '';
+      // Show main-content and adjust layout
+      this.mainContent.classList.remove('hidden');
+      this.buffer.classList.remove('hidden');
+      this.helpScreen.classList.add('hidden');
+      // Show help guide again after :d
+      this.showHelpGuide();
     } else {
       this.buffer.textContent = `Unknown command: ${this.command}`;
       this.buffer.className = 'flex-1 p-4 overflow-y-auto text-yellow-400';
