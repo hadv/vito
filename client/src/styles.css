@@ -1,34 +1,9 @@
-body {
-  margin: 0;
-  padding: 0;
-  height: 100vh;
-  background: #1e1e1e;
-  color: #d4d4d4;
-  font-family: 'Fira Code', Consolas, monospace;
-}
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
-#app {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-}
-
-#buffer {
-  flex-grow: 1;
-  padding: 10px;
-  outline: none;
-  overflow-y: auto;
-}
-
-#buffer canvas {
-  display: block;
-  margin: 10px auto; /* Center the QR code */
-  max-width: 100%; /* Ensure it fits */
-}
-
-#status-bar {
-  background: #3c3c3c;
-  padding: 5px;
-  font-size: 12px;
-  text-align: left;
+@layer base {
+  body {
+    @apply bg-gray-900 text-gray-200 h-screen m-0 p-0 font-mono;
+  }
 }
