@@ -1,11 +1,12 @@
+# Minimalist Safe{Wallet}
 
-# Vim Safe App
+Minimalist Safe{Wallet} is a secure and efficient application designed to interact with Safe{Wallet} through a minimalist command-line interface. It provides a streamlined experience for managing your Safe{Wallet} transactions and operations.
 
 ## Description
-Vim Safe App is a secure and efficient application designed to enhance your Vim experience. It provides various features to ensure your work is safe and your productivity is maximized.
+Minimalist Safe{Wallet} is a secure and efficient application designed to enhance your Safe{Wallet} experience. It provides various features to ensure your work is safe and your productivity is maximized.
 
 ## Installation
-To install Vim Safe App, follow these steps:
+To install Minimalist Safe{Wallet}, follow these steps:
 1. Clone the repository:
     ```sh
     git clone https://github.com/yourusername/vim-safe-app.git
@@ -20,13 +21,13 @@ To install Vim Safe App, follow these steps:
     ```
 
 ## Usage
-To start using Vim Safe App, run the following command:
+To start using Minimalist Safe{Wallet}, run the following command:
 ```sh
 npm start
 ```
 
 ## Contributing
-If you would like to contribute to Vim Safe App, please follow these steps:
+If you would like to contribute to Minimalist Safe{Wallet}, please follow these steps:
 1. Fork the repository.
 2. Create a new branch (`git checkout -b feature-branch`).
 3. Make your changes.
@@ -35,4 +36,4 @@ If you would like to contribute to Vim Safe App, please follow these steps:
 6. Open a pull request.
 
 ## License
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License - see the [LICENSE.md](LICENSE) file for details.
