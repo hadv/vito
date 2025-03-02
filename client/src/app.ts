@@ -55,10 +55,33 @@ class VimApp {
     if (this.safeAddressInput) {
       this.safeAddressInput.addEventListener('paste', (e) => {
         setTimeout(() => {
+          // Grey out and make readonly instead of disabled
+          this.safeAddressInput!.readOnly = true;
+          this.safeAddressInput!.classList.add('opacity-50', 'cursor-pointer');
           this.commandInput.focus();
         }, 10);
       });
+
+      this.safeAddressInput.addEventListener('click', (e) => {
+        if (this.safeAddressInput!.readOnly) {
+          // Re-enable and restore opacity
+          this.safeAddressInput!.readOnly = false;
+          this.safeAddressInput!.classList.remove('opacity-50', 'cursor-pointer');
+          this.safeAddressInput!.focus();
+          e.preventDefault(); // Prevent any default behavior
+        }
+      });
+
+      // Also handle focus event
+      this.safeAddressInput.addEventListener('focus', (e) => {
+        if (this.safeAddressInput!.readOnly) {
+          this.safeAddressInput!.readOnly = false;
+          this.safeAddressInput!.classList.remove('opacity-50', 'cursor-pointer');
+        }
+      });
     }
+
+    this.updateTitle();
   }
 
   private async resolveEnsName(address: string): Promise<string | null> {
@@ -159,7 +182,7 @@ class VimApp {
       this.signClient = await SignClient.init({
         projectId: import.meta.env.VITE_WALLET_CONNECT_PROJECT_ID || 'your_wallet_connect_project_id',
         metadata: {
-          name: 'Vim Safe App',
+          name: 'Minimalist Safe{Wallet}',
           description: 'A minimalist Safe app with Vim-like keybindings',
           url: 'http://localhost:3000',
           icons: ['https://walletconnect.com/walletconnect-logo.png'],
@@ -563,8 +586,26 @@ class VimApp {
     if (this.safeAddressInput) {
       this.safeAddressInput.addEventListener('paste', (e) => {
         setTimeout(() => {
+          this.safeAddressInput!.readOnly = true;
+          this.safeAddressInput!.classList.add('opacity-50', 'cursor-pointer');
           this.commandInput.focus();
         }, 10);
+      });
+
+      this.safeAddressInput.addEventListener('click', (e) => {
+        if (this.safeAddressInput!.readOnly) {
+          this.safeAddressInput!.readOnly = false;
+          this.safeAddressInput!.classList.remove('opacity-50', 'cursor-pointer');
+          this.safeAddressInput!.focus();
+          e.preventDefault();
+        }
+      });
+
+      this.safeAddressInput.addEventListener('focus', (e) => {
+        if (this.safeAddressInput!.readOnly) {
+          this.safeAddressInput!.readOnly = false;
+          this.safeAddressInput!.classList.remove('opacity-50', 'cursor-pointer');
+        }
       });
     }
   }
@@ -730,7 +771,7 @@ class VimApp {
       newContainer.innerHTML = `
         <div class="relative">
           <div class="absolute inset-y-0 left-0 flex items-center pl-3.5 pointer-events-none">
-            <div class="w-8 h-8 bg-gray-600 rounded-full"></div>
+            <div class="w-6 h-6 bg-gray-600 rounded-full"></div>
           </div>
           <input 
             type="text" 
@@ -740,7 +781,7 @@ class VimApp {
           />
           <label 
             for="safe-address-input" 
-            class="absolute text-sm text-gray-400 duration-300 transform -translate-y-4 scale-75 top-2 z-10 origin-[0] bg-[#2c2c2c] px-2 peer-focus:px-2 peer-focus:text-blue-600 left-1"
+            class="absolute text-sm text-gray-400 duration-300 transform -translate-y-6 scale-75 top-2 z-10 origin-[0] bg-[#2c2c2c] px-2 peer-focus:px-2 peer-focus:text-blue-600 left-1"
           >
             Safe Account
           </label>
@@ -766,14 +807,36 @@ class VimApp {
       if (this.safeAddressInput) {
         this.safeAddressInput.addEventListener('paste', (e) => {
           setTimeout(() => {
+            this.safeAddressInput!.readOnly = true;
+            this.safeAddressInput!.classList.add('opacity-50', 'cursor-pointer');
             this.commandInput.focus();
           }, 10);
+        });
+
+        this.safeAddressInput.addEventListener('click', (e) => {
+          if (this.safeAddressInput!.readOnly) {
+            this.safeAddressInput!.readOnly = false;
+            this.safeAddressInput!.classList.remove('opacity-50', 'cursor-pointer');
+            this.safeAddressInput!.focus();
+            e.preventDefault();
+          }
+        });
+
+        this.safeAddressInput.addEventListener('focus', (e) => {
+          if (this.safeAddressInput!.readOnly) {
+            this.safeAddressInput!.readOnly = false;
+            this.safeAddressInput!.classList.remove('opacity-50', 'cursor-pointer');
+          }
         });
       }
     } else {
       this.buffer.textContent = `Unknown command: ${this.command}`;
       this.buffer.className = 'flex-1 p-4 overflow-y-auto text-yellow-400';
     }
+  }
+
+  private updateTitle() {
+    document.title = `Minimalist Safe{Wallet}`;
   }
 }
 
