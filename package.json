@@ -1,10 +1,15 @@
 {
   "name": "vim-safe-app",
-  "private": true,
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
   "scripts": {
-    "start:client": "cd client && npm run dev",
-    "start:server": "cd server && npm run start:dev",
-    "start": "npm run start:server & npm run start:client",
-    "install:all": "cd client && npm install && cd ../server && npm install"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "concurrently \"cd client && npm run dev\" \"cd server && npm run start:dev\"",
+    "install": "cd client && npm install && cd ../server && npm install"
+  },
+  "devDependencies": {
+    "@types/qrcode": "^1.5.5",
+    "concurrently": "^8.2.2"
   }
 }

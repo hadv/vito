@@ -1,4 +1,4 @@
-import { WebSocketGateway, WebSocketServer, SubscribeMessage } from '@nestjs/websockets';
+import { WebSocketGateway, WebSocketServer, SubscribeMessage, MessageBody } from '@nestjs/websockets';
 import { Server } from 'socket.io';
 import { SafeService } from './safe.service';
 import { ConfigService } from '@nestjs/config';
@@ -16,19 +16,12 @@ export class SafeGateway {
   ) {}
 
   @SubscribeMessage('getSafeInfo')
-  async handleGetSafeInfo(client: any, data: { safeAddress: string }): Promise<void> {
-    if (!data || !data.safeAddress) {
-      this.server.emit('error', { message: 'Safe address required. Use :c first' });
-      return;
-    }
+  async handleGetSafeInfo(@MessageBody() data: { safeAddress: string; network: string }) {
     try {
-      const safeInfo = await this.safeService.getSafeInfo(data.safeAddress);
+      const safeInfo = await this.safeService.getSafeInfo(data.safeAddress, data.network);
       this.server.emit('safeInfo', safeInfo);
-    } catch (err) {
-      const errorMessage = err.message.includes('call revert exception')
-        ? `Invalid Safe address: ${data.safeAddress}`
-        : `Failed to fetch Safe info: ${err.message}`;
-      this.server.emit('error', { message: errorMessage });
+    } catch (error) {
+      this.server.emit('error', error.message);
     }
   }
 }
