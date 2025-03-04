@@ -111,6 +111,26 @@ class VimApp {
     setTimeout(() => {
       this.commandInput.focus();
     }, 100);
+
+    // Check for Safe address in URL parameters
+    const urlParams = new URLSearchParams(window.location.search);
+    const safeAddress = urlParams.get('safe');
+    if (safeAddress && this.safeAddressInput) {
+      this.safeAddressInput.value = safeAddress;
+      this.safeAddressInput.readOnly = true;
+      this.safeAddressInput.classList.add('opacity-50', 'cursor-pointer');
+      this.commandInput.focus();
+      
+      // Automatically connect to the Safe wallet
+      this.connectWallet(safeAddress).catch(error => {
+        console.error('Failed to auto-connect to Safe:', error);
+        this.buffer.innerHTML = '';
+        const errorMsg = document.createElement('p');
+        errorMsg.textContent = `Error: ${error instanceof Error ? error.message : 'Failed to connect to Safe'}`;
+        errorMsg.className = 'text-red-500';
+        this.buffer.appendChild(errorMsg);
+      });
+    }
   }
 
   private initEventListeners(): void {
@@ -202,6 +222,26 @@ class VimApp {
     this.inputContainer = document.getElementById('input-container') as HTMLDivElement;
     this.safeAddressInput = document.getElementById('safe-address-input') as HTMLInputElement;
     this.networkSelect = document.getElementById('network-select') as HTMLSelectElement;
+
+    // Check for Safe address in URL parameters
+    const urlParams = new URLSearchParams(window.location.search);
+    const safeAddress = urlParams.get('safe');
+    if (safeAddress && this.safeAddressInput) {
+      this.safeAddressInput.value = safeAddress;
+      this.safeAddressInput.readOnly = true;
+      this.safeAddressInput.classList.add('opacity-50', 'cursor-pointer');
+      this.commandInput.focus();
+      
+      // Automatically connect to the Safe wallet
+      this.connectWallet(safeAddress).catch(error => {
+        console.error('Failed to auto-connect to Safe:', error);
+        this.buffer.innerHTML = '';
+        const errorMsg = document.createElement('p');
+        errorMsg.textContent = `Error: ${error instanceof Error ? error.message : 'Failed to connect to Safe'}`;
+        errorMsg.className = 'text-red-500';
+        this.buffer.appendChild(errorMsg);
+      });
+    }
 
     // Add event listeners for command input handling
     if (this.safeAddressInput) {
@@ -442,11 +482,15 @@ class VimApp {
 
       // Update the Safe address display with ENS name if available
       if (this.safeAddressDisplay) {
-      const ensName = await this.resolveEnsName(safeAddress);
+        const ensName = await this.resolveEnsName(safeAddress);
         this.safeAddressDisplay.textContent = ensName 
           ? `${ensName} (${this.truncateAddress(safeAddress)})` 
           : this.truncateAddress(safeAddress);
       }
+
+      // Clear URL parameters after successful connection
+      const newUrl = window.location.pathname + window.location.hash;
+      window.history.replaceState({}, '', newUrl);
 
       // Show and update the header network select
       const headerNetworkContainer = document.getElementById('header-network-container');
@@ -1626,29 +1670,33 @@ class VimApp {
     ownersLabel.textContent = 'Owners:';
 
     const ownersList = document.createElement('ul');
-    ownersList.className = 'space-y-2';
+    ownersList.className = 'divide-y divide-gray-700';
     for (const owner of info.owners) {
       const ensName = info.ensNames[owner];
       const ownerItem = document.createElement('li');
-      ownerItem.className = 'text-gray-300 text-xs bg-gray-700 p-2 rounded';
+      ownerItem.className = 'py-3 flex items-start space-x-3';
       
       // Add owner status indicator
       const isCurrentSigner = this.signerAddress === owner;
       const statusIndicator = document.createElement('div');
-      statusIndicator.className = `w-2 h-2 rounded-full ${isCurrentSigner ? 'bg-green-500' : 'bg-gray-500'} inline-block mr-2`;
+      statusIndicator.className = `mt-1.5 h-2 w-2 rounded-full ${isCurrentSigner ? 'bg-green-500' : 'bg-gray-500'}`;
+      
+      const ownerContent = document.createElement('div');
+      ownerContent.className = 'flex-1 min-w-0';
       
       if (ensName) {
-        ownerItem.innerHTML = `
-          ${statusIndicator.outerHTML}
-          <div class="text-blue-400 font-medium">${ensName}</div>
-          <div class="text-gray-400 font-mono break-all text-[10px]">${owner}</div>
+        ownerContent.innerHTML = `
+          <p class="text-sm font-medium text-blue-400 truncate">${ensName}</p>
+          <p class="text-xs text-gray-400 font-mono break-all">${owner}</p>
         `;
       } else {
-        ownerItem.innerHTML = `
-          ${statusIndicator.outerHTML}
-          <div class="font-mono break-all text-[10px]">${owner}</div>
+        ownerContent.innerHTML = `
+          <p class="text-xs text-gray-400 font-mono break-all">${owner}</p>
         `;
       }
+      
+      ownerItem.appendChild(statusIndicator);
+      ownerItem.appendChild(ownerContent);
       ownersList.appendChild(ownerItem);
     }
 
