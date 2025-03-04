@@ -119,10 +119,10 @@ class VimApp {
     // Create new input container with network selection and Safe address input
     const newContainer = document.createElement('div');
     newContainer.id = 'input-container';
-    newContainer.className = 'flex-1 p-4 max-w-full';
+    newContainer.className = 'w-full sm:w-1/2 p-4';
     newContainer.innerHTML = `
-      <div class="space-y-4 sm:space-y-6">
-        <div class="relative flex flex-col sm:flex-row items-stretch sm:items-center gap-4">
+      <div class="space-y-4 sm:space-y-0">
+        <div class="relative flex flex-col sm:flex-row sm:items-center sm:gap-4">
           <div class="flex-grow relative">
             <div class="absolute inset-y-0 left-0 flex items-center pl-3.5 pointer-events-none">
               <div class="w-6 h-6 bg-gray-600 rounded-full"></div>
@@ -130,7 +130,7 @@ class VimApp {
             <input 
               type="text" 
               id="safe-address-input" 
-              class="block pl-14 pr-2.5 py-4 w-full text-white bg-[#2c2c2c] rounded-lg border border-gray-700 appearance-none focus:outline-none focus:ring-0 focus:border-blue-600 peer text-sm sm:text-base" 
+              class="block pl-14 pr-2.5 py-4 w-full text-white bg-[#2c2c2c] rounded-lg border border-gray-700 appearance-none focus:outline-none focus:ring-0 focus:border-blue-600 peer" 
               placeholder=" "
             />
             <label 
@@ -140,8 +140,8 @@ class VimApp {
               Safe Account
             </label>
           </div>
-          <div class="flex-shrink-0 relative">
-            <select id="network-select" class="h-[58px] w-full sm:w-36 px-3 text-white bg-[#2c2c2c] border border-gray-700 rounded-lg focus:outline-none focus:ring-0 focus:border-blue-600 appearance-none cursor-pointer text-sm sm:text-base">
+          <div class="flex-shrink-0 relative mt-4 sm:mt-0">
+            <select id="network-select" class="block w-full sm:w-36 h-[58px] px-3 text-white bg-[#2c2c2c] border border-gray-700 rounded-lg focus:outline-none focus:ring-0 focus:border-blue-600 appearance-none cursor-pointer">
               <option value="mainnet">Ethereum</option>
               <option value="arbitrum">Arbitrum</option>
               <option value="sepolia">Sepolia</option>
@@ -158,6 +158,7 @@ class VimApp {
 
     const mainContentDiv = document.getElementById('main-content') as HTMLDivElement;
     mainContentDiv.insertBefore(newContainer, document.getElementById('help-container'));
+    mainContentDiv.classList.remove('hidden');
 
     // Re-initialize references
     this.inputContainer = document.getElementById('input-container') as HTMLDivElement;
@@ -166,15 +167,11 @@ class VimApp {
 
     // Update help container classes for mobile responsiveness
     const helpContainer = document.getElementById('help-container') as HTMLDivElement;
-    helpContainer.className = 'w-full mt-4 sm:mt-0 sm:w-1/2 sm:pl-4';
+    helpContainer.className = 'w-full sm:w-1/2 p-4';
+    helpContainer.classList.remove('hidden');
 
     // Update main content layout for mobile responsiveness
     mainContentDiv.className = 'flex flex-col sm:flex-row w-full';
-
-    // Update input container width for desktop
-    if (this.inputContainer) {
-      this.inputContainer.className = 'flex-1 p-4 max-w-full sm:w-1/2';
-    }
 
     // Add network selection change handler
     if (this.networkSelect) {
@@ -200,15 +197,6 @@ class VimApp {
               warningMsg.textContent = `Warning: Safe ${this.safeAddress} does not exist on ${this.selectedNetwork.displayName}`;
               warningMsg.className = 'text-yellow-400';
               this.buffer.appendChild(warningMsg);
-              
-              // Update display to show network but indicate Safe doesn't exist
-              this.safeAddressDisplay.textContent = `${this.truncateAddress(this.safeAddress)} (not deployed on ${this.selectedNetwork.displayName})`;
-            } else {
-              // Safe exists, load its info with network information
-              await this.loadAndCacheSafeInfo();
-              // Update display
-              const ensName = await this.resolveEnsName(this.safeAddress);
-              this.safeAddressDisplay.textContent = `${ensName ? `${ensName} (${this.truncateAddress(this.safeAddress)})` : this.truncateAddress(this.safeAddress)} on ${this.selectedNetwork.displayName}`;
             }
           } catch (error) {
             console.error('Error checking Safe on new network:', error);
@@ -226,25 +214,27 @@ class VimApp {
     if (this.safeAddressInput) {
       this.safeAddressInput.addEventListener('paste', (e) => {
         setTimeout(() => {
-          this.safeAddressInput!.readOnly = true;
-          this.safeAddressInput!.classList.add('opacity-50', 'cursor-pointer');
-          this.commandInput.focus();
+          if (this.safeAddressInput) {
+            this.safeAddressInput.readOnly = true;
+            this.safeAddressInput.classList.add('opacity-50', 'cursor-pointer');
+            this.commandInput.focus();
+          }
         }, 10);
       });
 
       this.safeAddressInput.addEventListener('click', (e) => {
-        if (this.safeAddressInput!.readOnly) {
-          this.safeAddressInput!.readOnly = false;
-          this.safeAddressInput!.classList.remove('opacity-50', 'cursor-pointer');
-          this.safeAddressInput!.focus();
+        if (this.safeAddressInput && this.safeAddressInput.readOnly) {
+          this.safeAddressInput.readOnly = false;
+          this.safeAddressInput.classList.remove('opacity-50', 'cursor-pointer');
+          this.safeAddressInput.focus();
           e.preventDefault();
         }
       });
 
       this.safeAddressInput.addEventListener('focus', (e) => {
-        if (this.safeAddressInput!.readOnly) {
-          this.safeAddressInput!.readOnly = false;
-          this.safeAddressInput!.classList.remove('opacity-50', 'cursor-pointer');
+        if (this.safeAddressInput && this.safeAddressInput.readOnly) {
+          this.safeAddressInput.readOnly = false;
+          this.safeAddressInput.classList.remove('opacity-50', 'cursor-pointer');
         }
       });
     }
@@ -353,7 +343,7 @@ class VimApp {
       this.helpScreen.classList.add('hidden');
       
       // Update help container classes to match input container spacing
-      this.helpContainer.className = 'w-full sm:w-1/2 sm:pl-4';
+      this.helpContainer.className = 'flex-1 p-4';
     } else {
       // If input field is not visible, show help in help-screen
       this.helpScreen.appendChild(mainContainer);
@@ -386,9 +376,21 @@ class VimApp {
       // Store the Safe address
       this.safeAddress = safeAddress;
 
-      // Update the Safe address display with network info
-      const ensName = await this.resolveEnsName(safeAddress);
-      this.safeAddressDisplay.textContent = `${ensName ? `${ensName} (${this.truncateAddress(safeAddress)})` : this.truncateAddress(safeAddress)} on ${this.selectedNetwork.displayName}`;
+      // Update the Safe address display with ENS name if available
+      if (this.safeAddressDisplay) {
+        const ensName = await this.resolveEnsName(safeAddress);
+        this.safeAddressDisplay.textContent = ensName 
+          ? `${ensName} (${this.truncateAddress(safeAddress)})` 
+          : this.truncateAddress(safeAddress);
+      }
+
+      // Show and update the header network select
+      const headerNetworkContainer = document.getElementById('header-network-container');
+      const headerNetworkSelect = document.getElementById('header-network-select') as HTMLSelectElement;
+      if (headerNetworkContainer && headerNetworkSelect) {
+        headerNetworkContainer.classList.remove('hidden');
+        headerNetworkSelect.innerHTML = `<option value="${this.selectedNetwork.name}">${this.selectedNetwork.displayName}</option>`;
+      }
 
       // Load and cache Safe info for the selected network
       await this.loadAndCacheSafeInfo();
@@ -403,13 +405,18 @@ class VimApp {
 
       // Update status bar
       this.updateStatus();
-        
-        // Clear the buffer and show success message
-        this.buffer.innerHTML = '';
+      
+      // Clear the buffer and show success message
+      this.buffer.innerHTML = '';
       const successMsg = document.createElement('p');
       successMsg.textContent = `Connected to Safe on ${this.selectedNetwork.displayName}`;
       successMsg.className = 'text-green-400';
       this.buffer.appendChild(successMsg);
+
+      // Ensure command input is focused
+      setTimeout(() => {
+        this.commandInput.focus();
+      }, 100);
 
     } catch (error: unknown) {
       console.error('Failed to connect to Safe:', error);
@@ -418,6 +425,12 @@ class VimApp {
       errorMsg.textContent = `Error: ${error instanceof Error ? error.message : 'Unknown error'}`;
       errorMsg.className = 'text-red-500';
       this.buffer.appendChild(errorMsg);
+      
+      // Ensure command input is focused even after error
+      setTimeout(() => {
+        this.commandInput.focus();
+      }, 100);
+      
       throw error;
     } finally {
       this.isConnecting = false;
@@ -484,7 +497,7 @@ class VimApp {
     this.sessionTopic = null;
     this.signerAddress = null;
     
-    // Update the UI
+    // Update the UI - ensure signer address display is cleared
     this.signerAddressDisplay.textContent = '';
     
     // Display a message to the user
@@ -591,7 +604,7 @@ class VimApp {
       await this.handleNormalMode(e);
     });
 
-    this.commandInput.addEventListener('paste', async (e: ClipboardEvent) => {
+    this.commandInput.addEventListener('paste', (e: ClipboardEvent) => {
       console.log('Paste event triggered');
       const pastedText = e.clipboardData?.getData('text') || '';
       console.log('Pasted text:', pastedText);
@@ -605,51 +618,86 @@ class VimApp {
       }
     });
 
-    document.addEventListener('click', (e) => {
-      // Get the clicked element
+    // Update click handler to be more specific about interactive elements
+    document.addEventListener('click', (e: MouseEvent) => {
       const target = e.target as Element;
+      const inputContainer = document.getElementById('input-container');
+      
+      // Check if the click is within the input container
+      if (inputContainer?.contains(target)) {
+        // Allow interaction with elements in the input container
+        return;
+      }
       
       // Check if the click is on an interactive element that should handle its own focus
       const isInteractiveElement = 
         target.tagName === 'BUTTON' || 
-        target.tagName === 'INPUT' || 
         target.tagName === 'A' ||
         target.tagName === 'SELECT' ||
-        target.tagName === 'TEXTAREA';
+        target.id === 'safe-address-input' ||
+        target.id === 'command-input' ||
+        target.tagName === 'TEXTAREA' ||
+        target.closest('.help-content') ||
+        target.closest('#buffer') ||
+        target.closest('#status-bar');
         
       // If we're not clicking on an interactive element, focus the command input
       if (!isInteractiveElement) {
-        console.log('Clicked on non-interactive element, focusing command input');
+        this.commandInput.focus();
+      }
+    });
+
+    // Update focusout handler to allow input container interactions
+    document.addEventListener('focusout', (e: FocusEvent) => {
+      const target = e.target as Element;
+      const relatedTarget = e.relatedTarget as Element;
+      const inputContainer = document.getElementById('input-container');
+      
+      // Don't refocus if we're interacting within the input container
+      if (inputContainer?.contains(target) || inputContainer?.contains(relatedTarget)) {
+        return;
+      }
+      
+      // Don't refocus if we're interacting with specific elements
+      const shouldSkipRefocus = 
+        target.closest('.help-content') ||
+        target.closest('#buffer') ||
+        target.closest('#status-bar') ||
+        relatedTarget?.closest('.help-content') ||
+        relatedTarget?.closest('#buffer') ||
+        relatedTarget?.closest('#status-bar');
+        
+      if (!shouldSkipRefocus) {
         setTimeout(() => {
           this.commandInput.focus();
         }, 10);
-      } else {
-        console.log('Clicked on interactive element:', target.tagName);
       }
     });
 
     if (this.safeAddressInput) {
       this.safeAddressInput.addEventListener('paste', (e) => {
         setTimeout(() => {
-          this.safeAddressInput!.readOnly = true;
-          this.safeAddressInput!.classList.add('opacity-50', 'cursor-pointer');
-          this.commandInput.focus();
+          if (this.safeAddressInput) {
+            this.safeAddressInput.readOnly = true;
+            this.safeAddressInput.classList.add('opacity-50', 'cursor-pointer');
+            this.commandInput.focus();
+          }
         }, 10);
       });
 
       this.safeAddressInput.addEventListener('click', (e) => {
-        if (this.safeAddressInput!.readOnly) {
-          this.safeAddressInput!.readOnly = false;
-          this.safeAddressInput!.classList.remove('opacity-50', 'cursor-pointer');
-          this.safeAddressInput!.focus();
+        if (this.safeAddressInput && this.safeAddressInput.readOnly) {
+          this.safeAddressInput.readOnly = false;
+          this.safeAddressInput.classList.remove('opacity-50', 'cursor-pointer');
+          this.safeAddressInput.focus();
           e.preventDefault();
         }
       });
 
       this.safeAddressInput.addEventListener('focus', (e) => {
-        if (this.safeAddressInput!.readOnly) {
-          this.safeAddressInput!.readOnly = false;
-          this.safeAddressInput!.classList.remove('opacity-50', 'cursor-pointer');
+        if (this.safeAddressInput && this.safeAddressInput.readOnly) {
+          this.safeAddressInput.readOnly = false;
+          this.safeAddressInput.classList.remove('opacity-50', 'cursor-pointer');
         }
       });
     }
@@ -814,13 +862,20 @@ class VimApp {
       this.safeAddressDisplay.textContent = '';
       this.signerAddressDisplay.textContent = '';
       
-      // Show initial input container
-      this.showInitialInputContainer();
-      
-      // Reset network select to mainnet if it exists
-      if (this.networkSelect) {
-        this.networkSelect.value = 'mainnet';
+      // Hide the header network select
+      const headerNetworkContainer = document.getElementById('header-network-container');
+      if (headerNetworkContainer) {
+        headerNetworkContainer.classList.add('hidden');
       }
+      
+      // Remove existing input container if it exists
+      const existingContainer = document.getElementById('input-container');
+      if (existingContainer) {
+        existingContainer.remove();
+      }
+      
+      // Show initial input container with fresh event listeners
+      this.showInitialInputContainer();
       
       // Show help guide
       this.showHelpGuide();
@@ -1971,12 +2026,15 @@ class VimApp {
       // Clear the buffer and show success message
       this.buffer.innerHTML = '';
       const successMessage = document.createElement('p');
-      successMessage.textContent = `Connected: ${address}${ensName ? ` (${ensName})` : ''}`;
+      successMessage.textContent = `Connected: ${ensName ? `${ensName} (${this.truncateAddress(address)})` : this.truncateAddress(address)}`;
       successMessage.className = 'text-green-400';
       this.buffer.appendChild(successMessage);
       this.buffer.className = 'flex-1 p-4 overflow-y-auto';
       
-      this.signerAddressDisplay.textContent = ensName ? `${ensName} (${address})` : address;
+      // Update signer address display with truncated address
+      this.signerAddressDisplay.textContent = ensName 
+        ? `${ensName} (${this.truncateAddress(address)})` 
+        : this.truncateAddress(address);
       
       // Reset command state and focus the command input
       this.command = '';

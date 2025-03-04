@@ -6,17 +6,29 @@
   <title>Minimalist Safe{Wallet}</title>
   <link rel="stylesheet" href="./styles.css" />
 </head>
-<body>
+<body class="flex flex-col h-screen">
   <header class="bg-gray-800 text-gray-200 p-4 flex justify-between items-center">
     <div class="flex items-center space-x-2">
       <a href="/" class="text-lg font-bold text-white">Minimalist Safe{Wallet}</a>
       <span id="safe-address-display" class="text-gray-400 text-sm"></span>
     </div>
-    <span id="signer-address-display" class="text-gray-400 text-sm"></span>
+    <div class="flex items-center space-x-4">
+      <span id="signer-address-display" class="text-gray-400 text-sm"></span>
+      <div class="relative hidden" id="header-network-container">
+        <select id="header-network-select" disabled class="h-[32px] pl-3 pr-8 text-gray-400 bg-[#2c2c2c] border border-gray-700 rounded-lg focus:outline-none appearance-none cursor-not-allowed text-sm">
+          <option value="mainnet">Ethereum</option>
+        </select>
+        <div class="absolute inset-y-0 right-0 flex items-center pr-2 pointer-events-none">
+          <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+          </svg>
+        </div>
+      </div>
+    </div>
   </header>
-  <div id="app" class="flex flex-col h-[calc(100vh-4rem)]">
-    <div id="main-content" class="flex flex-1">
-      <div id="input-container" class="flex-1 p-4">
+  <div id="app" class="flex-1 flex flex-col min-h-0">
+    <div id="main-content" class="flex-1 flex flex-col sm:flex-row w-full min-h-0">
+      <div id="input-container" class="w-full sm:w-1/2 p-4">
         <div class="relative">
           <div class="absolute inset-y-0 left-0 flex items-center pl-3.5 pointer-events-none">
             <div class="w-6 h-6 bg-gray-600 rounded-full"></div>
@@ -35,12 +47,28 @@
           </label>
         </div>
       </div>
-      <div id="help-container" class="flex-1 p-4"></div>
+      <div id="help-container" class="w-full sm:w-1/2 p-4">
+        <div class="relative">
+          <div class="absolute inset-y-0 left-0 flex items-center pl-3.5 pointer-events-none">
+            <div class="w-6 h-6 bg-gray-600 rounded-full"></div>
+          </div>
+          <div 
+            class="block pl-14 pr-2.5 py-4 w-full text-white bg-[#2c2c2c] rounded-lg border border-gray-700 appearance-none focus:outline-none focus:ring-0 focus:border-blue-600" 
+          >
+            <div class="help-content"></div>
+          </div>
+          <label 
+            class="absolute text-sm text-gray-400 transform -translate-y-6 scale-75 top-2 z-10 origin-[0] bg-[#2c2c2c] px-2 left-1"
+          >
+            Mode Switching and Commands
+          </label>
+        </div>
+      </div>
     </div>
     <div id="help-screen" class="flex-1 p-4 hidden"></div>
     <input id="command-input" class="absolute opacity-0 w-0 h-0" />
-    <div id="buffer" class="flex-1 p-4 overflow-y-auto"></div>
-    <div id="status-bar" class="bg-gray-700 p-2 text-sm"></div>
+    <div id="buffer" class="flex-1 p-4 overflow-y-auto min-h-0"></div>
+    <div id="status-bar" class="bg-gray-700 p-2 text-sm sticky bottom-0 z-50 border-t border-gray-600"></div>
   </div>
   <script type="module" src="/main.ts"></script>
 </body>
