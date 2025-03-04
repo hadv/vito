@@ -9,11 +9,11 @@ Minimalist Safe{Wallet} is a secure and efficient application designed to enhanc
 To install Minimalist Safe{Wallet}, follow these steps:
 1. Clone the repository:
     ```sh
-    git clone https://github.com/yourusername/vim-safe-app.git
+    git clone https://github.com/yourusername/vito.git
     ```
 2. Navigate to the project directory:
     ```sh
-    cd vim-safe-app
+    cd vito
     ```
 3. Install the dependencies:
     ```sh
