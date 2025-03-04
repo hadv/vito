@@ -39,7 +39,6 @@ class VimApp {
   private provider: ethers.JsonRpcProvider;
   private signClient: any; // WalletConnect SignClient instance
   private sessionTopic: string | null = null; // Store the WalletConnect session topic
-  private isModeSwitch: boolean = false;
   private cachedSafeInfo: SafeInfo | null = null;
   private selectedNetwork: NetworkConfig;
   private isConnecting: boolean = false; // Add flag to track connection state
@@ -55,19 +54,19 @@ class VimApp {
       name: 'mainnet',
       chainId: 1,
       provider: `https://eth-mainnet.g.alchemy.com/v2/${import.meta.env.VITE_ALCHEMY_API_KEY}`,
-      displayName: 'Ethereum Mainnet'
+      displayName: 'Ethereum'
     },
     arbitrum: {
       name: 'arbitrum',
       chainId: 42161,
       provider: `https://arb-mainnet.g.alchemy.com/v2/${import.meta.env.VITE_ALCHEMY_API_KEY}`,
-      displayName: 'Arbitrum One'
+      displayName: 'Arbitrum'
     },
     sepolia: {
       name: 'sepolia',
       chainId: 11155111,
       provider: `https://eth-sepolia.g.alchemy.com/v2/${import.meta.env.VITE_ALCHEMY_API_KEY}`,
-      displayName: 'Sepolia Testnet'
+      displayName: 'Sepolia'
     }
   };
 
@@ -309,10 +308,6 @@ class VimApp {
     }, 100);
   }
 
-  private showNetworkSelection(): void {
-    // Remove this method as it's no longer needed
-    // The network selection is now handled in showInitialInputContainer
-  }
 
   private async resolveEnsName(address: string): Promise<string | null> {
     try {
@@ -682,8 +677,6 @@ class VimApp {
         // Clear buffer before checking ownership
         this.buffer.innerHTML = '';
         
-        // Set flag for mode switch attempt
-        this.isModeSwitch = true;
         
         // Check if the signer is an owner
         if (this.cachedSafeInfo && this.cachedSafeInfo.owners.includes(this.signerAddress)) {
@@ -735,7 +728,6 @@ class VimApp {
   }
 
   private async executeCommand(): Promise<void> {
-    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
     this.buffer.className = 'flex-1 p-4 overflow-y-auto';
 
     // Clear the help screen and buffer before executing any command
