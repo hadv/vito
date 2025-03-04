@@ -215,7 +215,7 @@ class VimApp {
         }
       });
 
-      this.safeAddressInput.addEventListener('paste', (e) => {
+      this.safeAddressInput.addEventListener('paste', () => {
         setTimeout(() => {
           if (this.safeAddressInput) {
             this.safeAddressInput.readOnly = true;
@@ -513,7 +513,7 @@ class VimApp {
     if (!this.signClient) return;
     
     // Listen for session deletion events (disconnections)
-    this.signClient.on('session_delete', ({ id, topic }: { id: number, topic: string }) => {
+    this.signClient.on('session_delete', ({ topic }: { topic: string }) => {
       console.log(`WalletConnect session deleted: ${topic}`);
       
       // Only handle if it's our current session
@@ -523,7 +523,7 @@ class VimApp {
     });
     
     // Listen for session expiration events
-    this.signClient.on('session_expire', ({ id, topic }: { id: number, topic: string }) => {
+    this.signClient.on('session_expire', ({ topic }: { topic: string }) => {
       console.log(`WalletConnect session expired: ${topic}`);
       
       // Only handle if it's our current session
@@ -1862,9 +1862,6 @@ class VimApp {
 
   private async signMessage(message: string): Promise<string | null> {
     try {
-      // Parse the typed data message
-      const typedData = JSON.parse(message);
-      
       // Request signature using WalletConnect v2 with eth_signTypedData_v4
       const signature = await this.signClient.request({
         topic: this.sessionTopic!,
