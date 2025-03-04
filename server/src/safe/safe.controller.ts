@@ -43,7 +43,32 @@ export class SafeController {
     @Body() data: { safeAddress: string; transaction: SafeTransaction; network: string },
   ) {
     try {
+      console.log('Received prepare transaction request:', JSON.stringify(data, null, 2));
+      
+      // Validate input data
+      if (!data.safeAddress) {
+        throw new Error('safeAddress is required');
+      }
+      if (!data.transaction) {
+        throw new Error('transaction object is required');
+      }
+      if (!data.transaction.to) {
+        throw new Error('transaction.to is required');
+      }
+      if (!data.network) {
+        throw new Error('network is required');
+      }
+
       const { safeAddress, transaction, network } = data;
+      console.log('Calling safeService.prepareTransaction with:', {
+        safeAddress,
+        to: transaction.to,
+        value: transaction.value,
+        data: transaction.data,
+        operation: transaction.operation,
+        network
+      });
+
       const preparedTx = await this.safeService.prepareTransaction(
         safeAddress,
         transaction.to,
@@ -52,8 +77,19 @@ export class SafeController {
         transaction.operation || 0,
         network,
       );
+      
+      console.log('Transaction prepared successfully:', JSON.stringify(preparedTx, null, 2));
       return preparedTx;
     } catch (error) {
+      console.error('Error in prepareTransaction controller:', error);
+      if (error instanceof Error) {
+        console.error('Error details:', {
+          message: error.message,
+          stack: error.stack,
+          name: error.name,
+          cause: error.cause
+        });
+      }
       throw new HttpException(
         error.message || 'Failed to prepare transaction',
         HttpStatus.INTERNAL_SERVER_ERROR,
