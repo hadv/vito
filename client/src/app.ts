@@ -119,10 +119,10 @@ class VimApp {
     // Create new input container with network selection and Safe address input
     const newContainer = document.createElement('div');
     newContainer.id = 'input-container';
-    newContainer.className = 'flex-1 p-4';
+    newContainer.className = 'flex-1 p-4 max-w-full';
     newContainer.innerHTML = `
-      <div class="space-y-6">
-        <div class="relative flex items-center gap-4">
+      <div class="space-y-4 sm:space-y-6">
+        <div class="relative flex flex-col sm:flex-row items-stretch sm:items-center gap-4">
           <div class="flex-grow relative">
             <div class="absolute inset-y-0 left-0 flex items-center pl-3.5 pointer-events-none">
               <div class="w-6 h-6 bg-gray-600 rounded-full"></div>
@@ -130,7 +130,7 @@ class VimApp {
             <input 
               type="text" 
               id="safe-address-input" 
-              class="block pl-14 pr-2.5 py-4 w-full text-white bg-[#2c2c2c] rounded-lg border border-gray-700 appearance-none focus:outline-none focus:ring-0 focus:border-blue-600 peer" 
+              class="block pl-14 pr-2.5 py-4 w-full text-white bg-[#2c2c2c] rounded-lg border border-gray-700 appearance-none focus:outline-none focus:ring-0 focus:border-blue-600 peer text-sm sm:text-base" 
               placeholder=" "
             />
             <label 
@@ -141,7 +141,7 @@ class VimApp {
             </label>
           </div>
           <div class="flex-shrink-0 relative">
-            <select id="network-select" class="h-[58px] w-36 px-3 text-white bg-[#2c2c2c] border border-gray-700 rounded-lg focus:outline-none focus:ring-0 focus:border-blue-600 appearance-none cursor-pointer">
+            <select id="network-select" class="h-[58px] w-full sm:w-36 px-3 text-white bg-[#2c2c2c] border border-gray-700 rounded-lg focus:outline-none focus:ring-0 focus:border-blue-600 appearance-none cursor-pointer text-sm sm:text-base">
               <option value="mainnet">Ethereum</option>
               <option value="arbitrum">Arbitrum</option>
               <option value="sepolia">Sepolia</option>
@@ -163,6 +163,18 @@ class VimApp {
     this.inputContainer = document.getElementById('input-container') as HTMLDivElement;
     this.safeAddressInput = document.getElementById('safe-address-input') as HTMLInputElement;
     this.networkSelect = document.getElementById('network-select') as HTMLSelectElement;
+
+    // Update help container classes for mobile responsiveness
+    const helpContainer = document.getElementById('help-container') as HTMLDivElement;
+    helpContainer.className = 'w-full mt-4 sm:mt-0 sm:w-1/2 sm:pl-4';
+
+    // Update main content layout for mobile responsiveness
+    mainContentDiv.className = 'flex flex-col sm:flex-row w-full';
+
+    // Update input container width for desktop
+    if (this.inputContainer) {
+      this.inputContainer.className = 'flex-1 p-4 max-w-full sm:w-1/2';
+    }
 
     // Add network selection change handler
     if (this.networkSelect) {
@@ -190,13 +202,13 @@ class VimApp {
               this.buffer.appendChild(warningMsg);
               
               // Update display to show network but indicate Safe doesn't exist
-              this.safeAddressDisplay.textContent = `${this.safeAddress} (not deployed on ${this.selectedNetwork.displayName})`;
+              this.safeAddressDisplay.textContent = `${this.truncateAddress(this.safeAddress)} (not deployed on ${this.selectedNetwork.displayName})`;
             } else {
               // Safe exists, load its info with network information
               await this.loadAndCacheSafeInfo();
               // Update display
               const ensName = await this.resolveEnsName(this.safeAddress);
-              this.safeAddressDisplay.textContent = `${ensName ? `${ensName} (${this.safeAddress})` : this.safeAddress} on ${this.selectedNetwork.displayName}`;
+              this.safeAddressDisplay.textContent = `${ensName ? `${ensName} (${this.truncateAddress(this.safeAddress)})` : this.truncateAddress(this.safeAddress)} on ${this.selectedNetwork.displayName}`;
             }
           } catch (error) {
             console.error('Error checking Safe on new network:', error);
@@ -261,21 +273,20 @@ class VimApp {
     this.helpContainer.innerHTML = '';
     this.helpScreen.innerHTML = '';
 
-    // Help Box
-    const helpBox = document.createElement('div');
-    helpBox.className = 'bg-[#2c2c2c] p-6 rounded-lg border border-gray-700 w-full max-w-2xl shadow-lg';
+    // Create main container with responsive spacing
+    const mainContainer = document.createElement('div');
+    mainContainer.className = 'space-y-4 sm:space-y-6';
 
-    const helpTitle = document.createElement('h3');
-    helpTitle.className = 'text-gray-300 text-sm font-medium mb-4';
-    helpTitle.textContent = 'Help & Usage Guide';
+    // Mode Switching Box
+    const modeBox = document.createElement('div');
+    modeBox.className = 'bg-[#2c2c2c] p-4 rounded-lg border border-gray-700 shadow-lg';
 
-    // Mode switching section
-    const modeTitle = document.createElement('h4');
-    modeTitle.className = 'text-gray-400 text-xs font-medium mt-4 mb-2';
-    modeTitle.textContent = 'Mode Switching';
+    const modeLabel = document.createElement('h3');
+    modeLabel.className = 'text-gray-400 text-xs font-medium mb-2';
+    modeLabel.textContent = 'Mode Switching';
 
     const modeList = document.createElement('ul');
-    modeList.className = 'text-gray-300 text-xs mb-4';
+    modeList.className = 'space-y-2';
     
     const modes = [
       { key: 'e', desc: 'Switch to TX mode (requires connected wallet via :wc)' },
@@ -284,54 +295,68 @@ class VimApp {
 
     modes.forEach(({ key, desc }) => {
       const modeItem = document.createElement('li');
-      modeItem.className = 'mb-2';
-      modeItem.innerHTML = `<span class="text-blue-400 font-medium">${key}</span> - ${desc}`;
+      modeItem.className = 'text-gray-300 text-xs flex items-center gap-2';
+      modeItem.innerHTML = `
+        <span class="text-blue-400 font-medium w-8">${key}</span>
+        <span class="text-gray-400">${desc}</span>
+      `;
       modeList.appendChild(modeItem);
     });
 
-    // Commands section
-    const commandsTitle = document.createElement('h4');
-    commandsTitle.className = 'text-gray-400 text-xs font-medium mt-4 mb-2';
-    commandsTitle.textContent = 'Commands';
+    modeBox.appendChild(modeLabel);
+    modeBox.appendChild(modeList);
+    mainContainer.appendChild(modeBox);
+
+    // Commands Box
+    const commandsBox = document.createElement('div');
+    commandsBox.className = 'bg-[#2c2c2c] p-4 rounded-lg border border-gray-700 shadow-lg';
+
+    const commandsLabel = document.createElement('h3');
+    commandsLabel.className = 'text-gray-400 text-xs font-medium mb-2';
+    commandsLabel.textContent = 'Commands';
 
     const commandsList = document.createElement('ul');
-    commandsList.className = 'text-gray-300 text-xs';
+    commandsList.className = 'space-y-2';
 
     const commands = [
-      { cmd: ':c', desc: 'Connect a Safe wallet by entering its address in the input field.' },
-      { cmd: ':i', desc: 'Display information about the connected Safe wallet (requires :c first).' },
-      { cmd: ':wc', desc: 'Connect a signer wallet via WalletConnect to interact with the Safe (requires :c first).' },
-      { cmd: ':dc', desc: 'Disconnect the current signer wallet (requires :wc first).' },
-      { cmd: ':t', desc: 'Create a new transaction (requires TX mode, press "e" to switch modes).' },
-      { cmd: ':l', desc: 'List all pending transactions for the connected Safe, with options to sign or execute them.' },
-      { cmd: ':q', desc: 'Clear the buffer screen.' },
-      { cmd: ':d', desc: 'Disconnect the Safe wallet and return to the input screen to connect a new Safe.' },
-      { cmd: ':h', desc: 'Show this help guide with usage instructions for all commands.' },
+      { cmd: ':c', desc: 'Connect a Safe wallet' },
+      { cmd: ':i', desc: 'Display Safe information' },
+      { cmd: ':wc', desc: 'Connect a signer wallet via WalletConnect' },
+      { cmd: ':dc', desc: 'Disconnect the current signer wallet' },
+      { cmd: ':t', desc: 'Create a new transaction' },
+      { cmd: ':l', desc: 'List pending transactions' },
+      { cmd: ':q', desc: 'Clear the buffer screen' },
+      { cmd: ':d', desc: 'Disconnect the Safe wallet' },
+      { cmd: ':h', desc: 'Show this help guide' },
     ];
 
     commands.forEach(({ cmd, desc }) => {
       const commandItem = document.createElement('li');
-      commandItem.className = 'mb-2';
-      commandItem.innerHTML = `<span class="text-blue-400 font-medium">${cmd}</span> - ${desc}`;
+      commandItem.className = 'text-gray-300 text-xs flex items-center gap-2';
+      commandItem.innerHTML = `
+        <span class="text-blue-400 font-medium w-8">${cmd}</span>
+        <span class="text-gray-400">${desc}</span>
+      `;
       commandsList.appendChild(commandItem);
     });
 
-    helpBox.appendChild(helpTitle);
-    helpBox.appendChild(modeTitle);
-    helpBox.appendChild(modeList);
-    helpBox.appendChild(commandsTitle);
-    helpBox.appendChild(commandsList);
+    commandsBox.appendChild(commandsLabel);
+    commandsBox.appendChild(commandsList);
+    mainContainer.appendChild(commandsBox);
 
     if (this.inputContainer) {
       // If input field is visible, show help in help-container
-      this.helpContainer.appendChild(helpBox);
+      this.helpContainer.appendChild(mainContainer);
       this.helpContainer.classList.remove('hidden');
       this.mainContent.classList.remove('hidden');
       this.buffer.classList.remove('hidden');
       this.helpScreen.classList.add('hidden');
+      
+      // Update help container classes to match input container spacing
+      this.helpContainer.className = 'w-full sm:w-1/2 sm:pl-4';
     } else {
       // If input field is not visible, show help in help-screen
-      this.helpScreen.appendChild(helpBox);
+      this.helpScreen.appendChild(mainContainer);
       this.helpScreen.classList.remove('hidden');
       this.mainContent.classList.add('hidden');
       this.buffer.classList.add('hidden');
@@ -363,7 +388,7 @@ class VimApp {
 
       // Update the Safe address display with network info
       const ensName = await this.resolveEnsName(safeAddress);
-      this.safeAddressDisplay.textContent = `${ensName ? `${ensName} (${safeAddress})` : safeAddress} on ${this.selectedNetwork.displayName}`;
+      this.safeAddressDisplay.textContent = `${ensName ? `${ensName} (${this.truncateAddress(safeAddress)})` : this.truncateAddress(safeAddress)} on ${this.selectedNetwork.displayName}`;
 
       // Load and cache Safe info for the selected network
       await this.loadAndCacheSafeInfo();
@@ -447,8 +472,8 @@ class VimApp {
     if (this.signerAddress) {
       const ensName = await this.resolveEnsName(this.signerAddress);
       this.signerAddressDisplay.textContent = ensName 
-        ? `${ensName} (${this.signerAddress})` 
-        : this.signerAddress;
+        ? `${ensName} (${this.truncateAddress(this.signerAddress)})` 
+        : this.truncateAddress(this.signerAddress);
     } else {
       this.signerAddressDisplay.textContent = '';
     }
@@ -872,6 +897,10 @@ class VimApp {
         return;
       }
       await this.disconnectWallet();
+    } else if (this.command === ':q') {
+      // Clear the buffer
+      this.buffer.innerHTML = '';
+      this.buffer.className = 'flex-1 p-4 overflow-y-auto';
     } else if (this.command === ':s') {
       if (this.mode !== 'TX') {
         this.buffer.textContent = 'Please switch to TX mode first by pressing "e" key';
@@ -1600,6 +1629,10 @@ class VimApp {
     document.title = `Minimalist Safe{Wallet}`;
   }
 
+  private truncateAddress(address: string): string {
+    return `${address.slice(0, 6)}...${address.slice(-6)}`;
+  }
+
   private async loadAndCacheSafeInfo(): Promise<void> {
     if (!this.safeAddress) return;
 
@@ -1719,34 +1752,38 @@ class VimApp {
     this.helpContainer.innerHTML = '';
     this.helpContainer.classList.add('hidden');
     this.helpScreen.innerHTML = '';
-      this.helpScreen.classList.add('hidden');
+    this.helpScreen.classList.add('hidden');
+
+    // Create main container with responsive spacing
+    const mainContainer = document.createElement('div');
+    mainContainer.className = 'w-full space-y-4 sm:space-y-6';
 
     // Network Info Box
     const networkBox = document.createElement('div');
-    networkBox.className = 'bg-[#2c2c2c] p-6 rounded-lg border border-gray-700 w-full max-w-2xl mx-auto mb-4 shadow-lg';
+    networkBox.className = 'bg-[#2c2c2c] p-4 sm:p-6 rounded-lg border border-gray-700 w-full shadow-lg';
 
     const networkLabel = document.createElement('h3');
     networkLabel.className = 'text-gray-400 text-xs font-medium mb-2';
     networkLabel.textContent = 'Network:';
 
     const networkValue = document.createElement('p');
-    networkValue.className = 'text-gray-300 text-xs mb-4';
+    networkValue.className = 'text-gray-300 text-xs';
     networkValue.textContent = this.selectedNetwork.displayName;
 
     networkBox.appendChild(networkLabel);
     networkBox.appendChild(networkValue);
-    this.buffer.appendChild(networkBox);
+    mainContainer.appendChild(networkBox);
 
     // Owners Box
     const ownersBox = document.createElement('div');
-    ownersBox.className = 'bg-[#2c2c2c] p-6 rounded-lg border border-gray-700 w-full max-w-2xl mx-auto mb-4 shadow-lg';
+    ownersBox.className = 'bg-[#2c2c2c] p-4 sm:p-6 rounded-lg border border-gray-700 w-full shadow-lg';
 
     const ownersLabel = document.createElement('h3');
     ownersLabel.className = 'text-gray-400 text-xs font-medium mb-2';
     ownersLabel.textContent = 'Owners:';
 
     const ownersList = document.createElement('ul');
-    ownersList.className = 'mb-4 space-y-2';
+    ownersList.className = 'space-y-2';
     for (const owner of info.owners) {
       const ensName = info.ensNames[owner];
       const ownerItem = document.createElement('li');
@@ -1754,20 +1791,21 @@ class VimApp {
       if (ensName) {
         ownerItem.innerHTML = `
           <div class="text-blue-400 font-medium">${ensName}</div>
-          <div class="text-gray-400 font-mono">${owner}</div>
+          <div class="text-gray-400 font-mono break-all">${owner}</div>
         `;
-    } else {
-        ownerItem.innerHTML = `<div class="font-mono">${owner}</div>`;
+      } else {
+        ownerItem.innerHTML = `<div class="font-mono break-all">${owner}</div>`;
       }
       ownersList.appendChild(ownerItem);
     }
 
     ownersBox.appendChild(ownersLabel);
     ownersBox.appendChild(ownersList);
+    mainContainer.appendChild(ownersBox);
 
     // Threshold Box
     const thresholdBox = document.createElement('div');
-    thresholdBox.className = 'bg-[#2c2c2c] p-6 rounded-lg border border-gray-700 w-full max-w-2xl mx-auto shadow-lg';
+    thresholdBox.className = 'bg-[#2c2c2c] p-4 sm:p-6 rounded-lg border border-gray-700 w-full shadow-lg';
 
     const thresholdLabel = document.createElement('p');
     thresholdLabel.className = 'text-gray-400 text-xs font-medium mb-2';
@@ -1779,10 +1817,10 @@ class VimApp {
 
     thresholdBox.appendChild(thresholdLabel);
     thresholdBox.appendChild(thresholdValue);
+    mainContainer.appendChild(thresholdBox);
 
-    // Append both boxes to buffer
-    this.buffer.appendChild(ownersBox);
-    this.buffer.appendChild(thresholdBox);
+    // Append the main container to buffer
+    this.buffer.appendChild(mainContainer);
   }
 
   private async initializeWalletConnect(chainId: number): Promise<void> {
@@ -1915,10 +1953,10 @@ class VimApp {
     this.buffer.appendChild(qrContainer);
 
     // Generate QR code
-    await QRCode.toCanvas(canvas, uri, { width: 300 }, (err: Error | null) => {
-      if (err) {
-        console.error('QR Code rendering error:', err);
-        this.buffer.textContent = `Error generating QR code: ${err.message}`;
+    await QRCode.toCanvas(canvas, uri, { width: 300 }, (error: Error | null | undefined) => {
+      if (error) {
+        console.error('QR Code rendering error:', error);
+        this.buffer.textContent = `Error generating QR code: ${error.message}`;
         this.buffer.className = 'flex-1 p-4 overflow-y-auto text-red-500';
       }
     });
