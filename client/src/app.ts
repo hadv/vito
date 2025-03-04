@@ -95,18 +95,57 @@ class VimApp {
     const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
     console.log('Connecting to WebSocket at:', apiUrl);
     this.socket = io(apiUrl, { transports: ['websocket'] });
-    this.commandInput.focus();
-    this.initSocketListeners();
+
+    // Initialize event listeners first
     this.initEventListeners();
+    
+    // Then show initial screen
+    this.showInitialInputContainer();
+    this.showHelpGuide();
+    this.updateTitle();
+    
+    // Initialize socket listeners
+    this.initSocketListeners();
     this.updateStatus();
 
-    // Show initial input container with network selection and Safe address input
-    this.showInitialInputContainer();
+    // Focus command input last
+    setTimeout(() => {
+      this.commandInput.focus();
+    }, 100);
+  }
 
-    // Show help guide on initial screen
-    this.showHelpGuide();
+  private initEventListeners(): void {
+    // Simple keydown handler for command input
+    this.commandInput.addEventListener('keydown', async (e: KeyboardEvent) => {
+      if (e.key === ':') {
+        this.command = ':';
+        this.updateStatus();
+        e.preventDefault();
+      } else if (this.command.startsWith(':')) {
+        if (e.key === 'Enter') {
+          await this.executeCommand();
+          this.command = '';
+        } else if (e.key === 'Backspace') {
+          this.command = this.command.slice(0, -1);
+        } else if (e.key === 'Escape') {
+          this.command = '';
+        } else if (e.key.length === 1) {
+          this.command += e.key;
+        }
+        this.updateStatus();
+        e.preventDefault();
+      } else if (e.key === 'e' && !this.command) {
+        await this.handleNormalMode(e);
+      }
+    });
 
-    this.updateTitle();
+    // Global click handler to maintain focus
+    document.addEventListener('click', (e: MouseEvent) => {
+      const target = e.target as Element;
+      if (!target.closest('input') && !target.closest('select') && !target.closest('button')) {
+        this.commandInput.focus();
+      }
+    });
   }
 
   private showInitialInputContainer(): void {
@@ -165,17 +204,55 @@ class VimApp {
     this.safeAddressInput = document.getElementById('safe-address-input') as HTMLInputElement;
     this.networkSelect = document.getElementById('network-select') as HTMLSelectElement;
 
-    // Update help container classes for mobile responsiveness
-    const helpContainer = document.getElementById('help-container') as HTMLDivElement;
-    helpContainer.className = 'w-full sm:w-1/2 p-4';
-    helpContainer.classList.remove('hidden');
+    // Add event listeners for command input handling
+    if (this.safeAddressInput) {
+      this.safeAddressInput.addEventListener('keydown', (e) => {
+        // Allow command input to capture : key for starting commands
+        if (e.key === ':') {
+          e.preventDefault();
+          this.commandInput.focus();
+          this.command = ':';
+          this.updateStatus();
+        }
+      });
 
-    // Update main content layout for mobile responsiveness
-    mainContentDiv.className = 'flex flex-col sm:flex-row w-full';
+      this.safeAddressInput.addEventListener('paste', (e) => {
+        setTimeout(() => {
+          if (this.safeAddressInput) {
+            this.safeAddressInput.readOnly = true;
+            this.safeAddressInput.classList.add('opacity-50', 'cursor-pointer');
+            this.commandInput.focus();
+          }
+        }, 10);
+      });
 
-    // Add network selection change handler
+      this.safeAddressInput.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (this.safeAddressInput && this.safeAddressInput.readOnly) {
+          this.safeAddressInput.readOnly = false;
+          this.safeAddressInput.classList.remove('opacity-50', 'cursor-pointer');
+          this.safeAddressInput.focus();
+        }
+      });
+    }
+
     if (this.networkSelect) {
+      this.networkSelect.addEventListener('keydown', (e) => {
+        // Allow command input to capture : key for starting commands
+        if (e.key === ':') {
+          e.preventDefault();
+          this.commandInput.focus();
+          this.command = ':';
+          this.updateStatus();
+        }
+      });
+
+      this.networkSelect.addEventListener('click', (e) => {
+        e.stopPropagation();
+      });
+
       this.networkSelect.addEventListener('change', async (e) => {
+        e.stopPropagation();
         const selectedNetwork = (e.target as HTMLSelectElement).value;
         
         // Clear any existing Safe info cache when network changes
@@ -188,10 +265,8 @@ class VimApp {
         // If a Safe is connected, verify it exists on the new network
         if (this.safeAddress) {
           try {
-            // Check if the Safe exists on the new network
             const code = await this.provider.getCode(this.safeAddress);
             if (code === '0x') {
-              // Safe doesn't exist on this network
               this.buffer.innerHTML = '';
               const warningMsg = document.createElement('p');
               warningMsg.textContent = `Warning: Safe ${this.safeAddress} does not exist on ${this.selectedNetwork.displayName}`;
@@ -207,37 +282,31 @@ class VimApp {
             this.buffer.appendChild(errorMsg);
           }
         }
-      });
-    }
 
-    // Add event listeners for the Safe address input
-    if (this.safeAddressInput) {
-      this.safeAddressInput.addEventListener('paste', (e) => {
+        // Focus command input after network selection
         setTimeout(() => {
-          if (this.safeAddressInput) {
-            this.safeAddressInput.readOnly = true;
-            this.safeAddressInput.classList.add('opacity-50', 'cursor-pointer');
-            this.commandInput.focus();
-          }
-        }, 10);
-      });
-
-      this.safeAddressInput.addEventListener('click', (e) => {
-        if (this.safeAddressInput && this.safeAddressInput.readOnly) {
-          this.safeAddressInput.readOnly = false;
-          this.safeAddressInput.classList.remove('opacity-50', 'cursor-pointer');
-          this.safeAddressInput.focus();
-          e.preventDefault();
-        }
-      });
-
-      this.safeAddressInput.addEventListener('focus', (e) => {
-        if (this.safeAddressInput && this.safeAddressInput.readOnly) {
-          this.safeAddressInput.readOnly = false;
-          this.safeAddressInput.classList.remove('opacity-50', 'cursor-pointer');
-        }
+          this.commandInput.focus();
+        }, 100);
       });
     }
+
+    // Add container-level event listeners
+    this.inputContainer?.addEventListener('click', (e) => {
+      e.stopPropagation();
+    });
+
+    // Update help container classes for mobile responsiveness
+    const helpContainer = document.getElementById('help-container') as HTMLDivElement;
+    helpContainer.className = 'w-full sm:w-1/2 p-4';
+    helpContainer.classList.remove('hidden');
+
+    // Update main content layout for mobile responsiveness
+    mainContentDiv.className = 'flex flex-col sm:flex-row w-full';
+
+    // Ensure command input is focused initially
+    setTimeout(() => {
+      this.commandInput.focus();
+    }, 100);
   }
 
   private showNetworkSelection(): void {
@@ -395,7 +464,7 @@ class VimApp {
       // Load and cache Safe info for the selected network
       await this.loadAndCacheSafeInfo();
 
-      // Remove the input container
+      // Only remove the input container if everything succeeded
       if (this.inputContainer) {
         this.inputContainer.remove();
         this.inputContainer = null;
@@ -403,13 +472,10 @@ class VimApp {
         this.networkSelect = null;
       }
 
-      // Update status bar
-      this.updateStatus();
-      
       // Clear the buffer and show success message
       this.buffer.innerHTML = '';
       const successMsg = document.createElement('p');
-      successMsg.textContent = `Connected to Safe on ${this.selectedNetwork.displayName}`;
+      successMsg.textContent = 'Successfully connected to Safe!';
       successMsg.className = 'text-green-400';
       this.buffer.appendChild(successMsg);
 
@@ -420,13 +486,24 @@ class VimApp {
 
     } catch (error: unknown) {
       console.error('Failed to connect to Safe:', error);
+      
+      // Show error message
       this.buffer.innerHTML = '';
       const errorMsg = document.createElement('p');
       errorMsg.textContent = `Error: ${error instanceof Error ? error.message : 'Unknown error'}`;
       errorMsg.className = 'text-red-500';
       this.buffer.appendChild(errorMsg);
       
-      // Ensure command input is focused even after error
+      // Reset Safe address and cached info
+      this.safeAddress = null;
+      this.clearSafeInfoCache();
+      
+      // Make sure input container is still available
+      if (!this.inputContainer) {
+        this.showInitialInputContainer();
+      }
+      
+      // Ensure command input is focused
       setTimeout(() => {
         this.commandInput.focus();
       }, 100);
@@ -591,116 +668,6 @@ class VimApp {
       console.error('Socket error:', error);
       this.updateStatus();
     });
-  }
-
-  private initEventListeners(): void {
-    // Remove any existing listeners to prevent duplicates
-    const newCommandInput = this.commandInput.cloneNode(true);
-    this.commandInput.parentNode?.replaceChild(newCommandInput, this.commandInput);
-    this.commandInput = newCommandInput as HTMLInputElement;
-    
-    this.commandInput.addEventListener('keydown', async (e: KeyboardEvent) => {
-      console.log('Keydown:', e.key);
-      await this.handleNormalMode(e);
-    });
-
-    this.commandInput.addEventListener('paste', (e: ClipboardEvent) => {
-      console.log('Paste event triggered');
-      const pastedText = e.clipboardData?.getData('text') || '';
-      console.log('Pasted text:', pastedText);
-      if (this.command.startsWith(':')) {
-        e.preventDefault();
-        this.command += pastedText.trim();
-        console.log('Updated command:', this.command);
-        this.updateStatus();
-      } else {
-        console.log('Paste ignored: not in command mode');
-      }
-    });
-
-    // Update click handler to be more specific about interactive elements
-    document.addEventListener('click', (e: MouseEvent) => {
-      const target = e.target as Element;
-      const inputContainer = document.getElementById('input-container');
-      
-      // Check if the click is within the input container
-      if (inputContainer?.contains(target)) {
-        // Allow interaction with elements in the input container
-        return;
-      }
-      
-      // Check if the click is on an interactive element that should handle its own focus
-      const isInteractiveElement = 
-        target.tagName === 'BUTTON' || 
-        target.tagName === 'A' ||
-        target.tagName === 'SELECT' ||
-        target.id === 'safe-address-input' ||
-        target.id === 'command-input' ||
-        target.tagName === 'TEXTAREA' ||
-        target.closest('.help-content') ||
-        target.closest('#buffer') ||
-        target.closest('#status-bar');
-        
-      // If we're not clicking on an interactive element, focus the command input
-      if (!isInteractiveElement) {
-        this.commandInput.focus();
-      }
-    });
-
-    // Update focusout handler to allow input container interactions
-    document.addEventListener('focusout', (e: FocusEvent) => {
-      const target = e.target as Element;
-      const relatedTarget = e.relatedTarget as Element;
-      const inputContainer = document.getElementById('input-container');
-      
-      // Don't refocus if we're interacting within the input container
-      if (inputContainer?.contains(target) || inputContainer?.contains(relatedTarget)) {
-        return;
-      }
-      
-      // Don't refocus if we're interacting with specific elements
-      const shouldSkipRefocus = 
-        target.closest('.help-content') ||
-        target.closest('#buffer') ||
-        target.closest('#status-bar') ||
-        relatedTarget?.closest('.help-content') ||
-        relatedTarget?.closest('#buffer') ||
-        relatedTarget?.closest('#status-bar');
-        
-      if (!shouldSkipRefocus) {
-        setTimeout(() => {
-          this.commandInput.focus();
-        }, 10);
-      }
-    });
-
-    if (this.safeAddressInput) {
-      this.safeAddressInput.addEventListener('paste', (e) => {
-        setTimeout(() => {
-          if (this.safeAddressInput) {
-            this.safeAddressInput.readOnly = true;
-            this.safeAddressInput.classList.add('opacity-50', 'cursor-pointer');
-            this.commandInput.focus();
-          }
-        }, 10);
-      });
-
-      this.safeAddressInput.addEventListener('click', (e) => {
-        if (this.safeAddressInput && this.safeAddressInput.readOnly) {
-          this.safeAddressInput.readOnly = false;
-          this.safeAddressInput.classList.remove('opacity-50', 'cursor-pointer');
-          this.safeAddressInput.focus();
-          e.preventDefault();
-        }
-      });
-
-      this.safeAddressInput.addEventListener('focus', (e) => {
-        if (this.safeAddressInput && this.safeAddressInput.readOnly) {
-          this.safeAddressInput.readOnly = false;
-          this.safeAddressInput.classList.remove('opacity-50', 'cursor-pointer');
-        }
-      });
-    }
   }
 
   private async handleNormalMode(e: KeyboardEvent): Promise<void> {
@@ -985,7 +952,7 @@ class VimApp {
   private showTransactionScreen(): void {
     // Clear existing content
     this.buffer.innerHTML = '';
-      this.buffer.className = 'flex-1 p-4 overflow-y-auto';
+    this.buffer.className = 'flex-1 p-4 overflow-y-auto';
 
     // Create transaction form container
     const formContainer = document.createElement('div');
@@ -1000,44 +967,17 @@ class VimApp {
     const form = document.createElement('form');
     form.className = 'space-y-6';
     form.id = 'transaction-form';
-    form.onsubmit = (e) => {
-      e.preventDefault();
-      // Handle form submission here
-      const to = (form.querySelector('#tx-to') as HTMLInputElement).value;
-      const value = (form.querySelector('#tx-value') as HTMLInputElement).value;
-      const data = (form.querySelector('#tx-data') as HTMLTextAreaElement).value;
+    form.onsubmit = (e) => e.preventDefault();
 
-      // Store form data in class variable
-      this.txFormData = { to, value, data };
-      console.log('Transaction form data stored:', this.txFormData);
-
-      // Show success message
-      const successMsg = document.createElement('div');
-      successMsg.className = 'mt-4 p-3 bg-green-800 text-white rounded';
-      successMsg.textContent = 'Transaction data saved. Use :p to prepare and sign.';
-      formContainer.appendChild(successMsg);
-
-      // Convert BigInt to string before emitting
-      const parsedValue = value ? ethers.parseEther(value) : 0n;
-      this.socket.emit('prepareTransaction', {
-        safeAddress: this.safeAddress,
-        transaction: {
-          to,
-          value: parsedValue.toString(), // Convert BigInt to string
-          data: data || '0x',
-        },
-        network: this.selectedNetwork.name,
-        chainId: this.selectedNetwork.chainId,
-        provider: this.selectedNetwork.provider
-      });
-    };
+    // Initialize txFormData
+    this.txFormData = { to: '', value: '', data: '' };
 
     // Create form fields
     const fields = [
       {
         id: 'tx-to',
         label: 'To Address',
-        type: 'text',
+        type: 'combo',
         placeholder: '0x...',
         required: true
       },
@@ -1045,9 +985,7 @@ class VimApp {
         id: 'tx-value',
         label: 'Value (ETH)',
         type: 'text',
-        placeholder: '0.0',
-        step: '0.1',
-        min: '0'
+        placeholder: '0.0'
       },
       {
         id: 'tx-data',
@@ -1067,255 +1005,135 @@ class VimApp {
       label.className = 'block text-sm font-medium text-gray-300 mb-1';
       label.textContent = field.label;
 
-      let input;
+      let input: HTMLInputElement | HTMLTextAreaElement;
       if (field.type === 'textarea') {
         input = document.createElement('textarea');
         input.rows = field.rows as number;
+        input.className = 'w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent';
+      } else if (field.type === 'combo') {
+        // Create input for address entry with datalist for suggestions
+        input = document.createElement('input');
+        input.type = 'text';
+        input.id = field.id;
+        input.className = 'w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent';
+        input.placeholder = field.placeholder;
+        if (field.required) input.required = true;
+
+        // Create datalist for owner suggestions
+        const datalist = document.createElement('datalist');
+        datalist.id = `${field.id}-list`;
+        
+        // Add owner options if available
+        if (this.cachedSafeInfo && this.cachedSafeInfo.owners.length > 0) {
+          this.cachedSafeInfo.owners.forEach(owner => {
+            const option = document.createElement('option');
+            option.value = owner;
+            const ensName = this.cachedSafeInfo!.ensNames[owner];
+            option.label = ensName ? `${ensName} (${this.truncateAddress(owner)})` : owner;
+            datalist.appendChild(option);
+          });
+        }
+
+        // Connect input to datalist
+        input.setAttribute('list', datalist.id);
+
+        // Add input event listener to update txFormData
+        input.addEventListener('input', () => {
+          this.txFormData!.to = input.value;
+        });
+
+        // Add keydown event listener for : key
+        input.addEventListener('keydown', function(this: HTMLElement, e: Event) {
+          const keyEvent = e as KeyboardEvent;
+          if (keyEvent.key === ':') {
+            e.preventDefault();
+            e.stopPropagation();
+            (document.getElementById('command-input') as HTMLInputElement)?.focus();
+            (window as any).vimApp.command = ':';
+            (window as any).vimApp.updateStatus();
+          }
+        });
+
+        fieldContainer.appendChild(label);
+        fieldContainer.appendChild(input);
+        fieldContainer.appendChild(datalist);
+        form.appendChild(fieldContainer);
+        return;
       } else {
         input = document.createElement('input');
         input.type = field.type;
-        if (field.step) input.step = field.step;
-        if (field.min) input.min = field.min;
+        input.className = 'w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent';
       }
 
       input.id = field.id;
-      input.className = 'w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent';
       input.placeholder = field.placeholder;
       if (field.required) input.required = true;
 
-      // Pre-fill with stored data if available
-      if (this.txFormData) {
+      // Add input event listener to update txFormData in real-time
+      input.addEventListener('input', () => {
         if (field.id === 'tx-to') {
-          (input as HTMLInputElement).value = this.txFormData.to || '';
+          this.txFormData!.to = (input as HTMLInputElement).value;
         } else if (field.id === 'tx-value') {
-          (input as HTMLInputElement).value = this.txFormData.value || '';
+          this.txFormData!.value = (input as HTMLInputElement).value;
         } else if (field.id === 'tx-data') {
-          (input as HTMLTextAreaElement).value = this.txFormData.data || '';
+          this.txFormData!.data = (input as HTMLTextAreaElement).value;
         }
-      }
+      });
 
-      // Configure decimal handling for ETH value input
-      if (field.id === 'tx-value') {
-        // Create a container for label and balance info
-        const labelContainer = document.createElement('div');
-        labelContainer.className = 'flex items-center justify-between mb-1';
-        
-        // Move the label to the container
-        label.className = 'text-sm font-medium text-gray-300';
-        
-        // Create a container for MAX button and balance
-        const rightContainer = document.createElement('div');
-        rightContainer.className = 'flex items-center gap-2';
-        
-        // Create MAX button
-        const maxButton = document.createElement('button');
-        maxButton.type = 'button';
-        maxButton.className = 'px-2 py-0.5 text-xs bg-gray-600 text-white rounded hover:bg-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500';
-        maxButton.textContent = 'MAX';
-        
-        // Create balance display
-        const balanceDisplay = document.createElement('div');
-        balanceDisplay.className = 'text-xs text-gray-400';
-        balanceDisplay.id = 'safe-balance';
-        balanceDisplay.textContent = 'Loading...';
-        
-        // Add input configuration
-        input.className = 'w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent';
-        input.setAttribute('pattern', '[0-9]*(.[0-9]+)?');
-        input.setAttribute('inputmode', 'decimal');
-        (input as HTMLInputElement).setAttribute('lang', 'en');
-        (input as HTMLInputElement).setAttribute('data-type', 'number');
-        
-        // Use cached balance if available
-        if (this.cachedSafeInfo) {
-          balanceDisplay.textContent = `${this.cachedSafeInfo.balance} ETH`;
-          maxButton.onclick = () => {
-            (input as HTMLInputElement).value = this.cachedSafeInfo!.balance;
-          };
-        } else {
-          // Fallback to fetching if cache is empty
-          this.provider.getBalance(this.safeAddress!).then(balance => {
-            const balanceInEth = ethers.formatEther(balance);
-            balanceDisplay.textContent = `${balanceInEth} ETH`;
-            maxButton.onclick = () => {
-              (input as HTMLInputElement).value = balanceInEth;
-            };
-          }).catch(err => {
-            console.error('Failed to fetch balance:', err);
-            balanceDisplay.textContent = 'Error';
-          });
+      // Add keydown event listener for each input to handle : key
+      input.addEventListener('keydown', function(this: HTMLElement, e: Event) {
+        const keyEvent = e as KeyboardEvent;
+        if (keyEvent.key === ':') {
+          e.preventDefault();
+          e.stopPropagation();
+          (document.getElementById('command-input') as HTMLInputElement)?.focus();
+          (window as any).vimApp.command = ':';
+          (window as any).vimApp.updateStatus();
         }
+      });
 
-        // Add input event listener to format decimal values
-        input.addEventListener('input', (e) => {
-          const target = e.target as HTMLInputElement;
-          let value = target.value;
-          
-          // Remove any non-numeric characters except decimal point
-          value = value.replace(/[^\d.]/g, '');
-          
-          // Ensure only one decimal point
-          const parts = value.split('.');
-          if (parts.length > 2) {
-            value = parts[0] + '.' + parts.slice(1).join('');
-          }
-          
-          // Update the input value
-          target.value = value;
-        });
-
-        // Assemble the components
-        rightContainer.appendChild(balanceDisplay);
-        rightContainer.appendChild(maxButton);
-        labelContainer.appendChild(label);
-        labelContainer.appendChild(rightContainer);
-        
-        fieldContainer.appendChild(labelContainer);
-        fieldContainer.appendChild(input);
-      } else if (field.id === 'tx-to') {
-        // Create a wrapper for the address input and dropdown
-        const addressWrapper = document.createElement('div');
-        addressWrapper.className = 'relative';
-        
-        // Create datalist container that will be styled as a dropdown
-        const ownersDropdown = document.createElement('div');
-        ownersDropdown.className = 'hidden absolute z-10 w-full mt-1 bg-gray-700 border border-gray-600 rounded-md shadow-lg max-h-60 overflow-y-auto';
-        ownersDropdown.id = 'owners-dropdown';
-        
-        // Configure input
-        input.className = 'w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent';
-        input.autocomplete = 'off';
-        
-        // Add input event listeners for custom dropdown behavior
-        input.addEventListener('focus', () => {
-          const ownersDropdown = document.getElementById('owners-dropdown');
-          if (ownersDropdown && this.cachedSafeInfo) {
-            // Use cached data for owners dropdown
-            ownersDropdown.innerHTML = '';
-            ownersDropdown.classList.remove('hidden');
-            
-            for (const owner of this.cachedSafeInfo.owners) {
-              const option = document.createElement('div');
-              option.className = 'px-4 py-2 text-white hover:bg-gray-600 cursor-pointer transition-colors duration-150';
-              
-              const ensName = this.cachedSafeInfo.ensNames[owner];
-              if (ensName) {
-                option.innerHTML = `
-                  <div class="text-sm font-medium text-blue-400">${ensName}</div>
-                  <div class="text-xs text-gray-400 font-mono">${owner}</div>
-                `;
-              } else {
-                option.innerHTML = `<div class="text-sm font-mono">${owner}</div>`;
-              }
-              
-              
-              option.addEventListener('click', () => {
-                const input = document.getElementById('tx-to') as HTMLInputElement;
-                if (input) {
-                  input.value = owner;
-                  ownersDropdown.classList.add('hidden');
-                  input.focus();
-                }
-              });
-              
-              ownersDropdown.appendChild(option);
-            }
-          } else {
-            // Fallback to fetching if cache is empty
-            ownersDropdown?.classList.remove('hidden');
-            this.socket.emit('getSafeInfo', { safeAddress: this.safeAddress });
-          }
-        });
-        
-        input.addEventListener('blur', () => {
-          // Delay hiding to allow for click events on the dropdown
-          setTimeout(() => {
-            ownersDropdown.classList.add('hidden');
-          }, 200);
-        });
-        
-        input.addEventListener('input', (e) => {
-          const target = e.target as HTMLInputElement;
-          const value = target.value.toLowerCase();
-          
-          // Show/hide options based on input
-          Array.from(ownersDropdown.children).forEach((option: Element) => {
-            const text = option.textContent?.toLowerCase() || '';
-            if (text.includes(value) || value === '') {
-              (option as HTMLElement).style.display = 'block';
-            } else {
-              (option as HTMLElement).style.display = 'none';
-            }
-          });
-          
-          ownersDropdown.classList.remove('hidden');
-        });
-        
-        // Assemble the components
-        fieldContainer.appendChild(label);
-        addressWrapper.appendChild(input);
-        addressWrapper.appendChild(ownersDropdown);
-        fieldContainer.appendChild(addressWrapper);
-      } else {
-        fieldContainer.appendChild(label);
+      fieldContainer.appendChild(label);
+      if (!field.type.includes('combo')) {
         fieldContainer.appendChild(input);
       }
       form.appendChild(fieldContainer);
     });
 
-    // Add submit button
-    const submitButtonContainer = document.createElement('div');
-    submitButtonContainer.className = 'mt-6';
-    
-    const submitButton = document.createElement('button');
-    submitButton.type = 'submit';
-    submitButton.className = 'w-full py-2 px-4 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50 transition-colors duration-200';
-    submitButton.textContent = 'Save Transaction';
-    
-    submitButtonContainer.appendChild(submitButton);
-    form.appendChild(submitButtonContainer);
+    // Add helper text
+    const helperText = document.createElement('p');
+    helperText.className = 'mt-6 text-sm text-gray-400';
+    helperText.textContent = 'Fill in the transaction details and use :p command to prepare and sign the transaction.';
+    form.appendChild(helperText);
 
     // Assemble the form
     formContainer.appendChild(title);
     formContainer.appendChild(form);
     this.buffer.appendChild(formContainer);
+
+    // Ensure command input is focused initially
+    setTimeout(() => {
+      this.commandInput.focus();
+    }, 100);
   }
 
   private async prepareAndSignTransaction(): Promise<void> {
     try {
-      console.log('Current txFormData:', this.txFormData);
-      
-      // Check if we have form data stored
-      if (!this.txFormData) {
-        // Try to get transaction details from form if it exists
-        const toInput = document.getElementById('tx-to') as HTMLInputElement;
-        const valueInput = document.getElementById('tx-value') as HTMLInputElement;
-        const dataInput = document.getElementById('tx-data') as HTMLTextAreaElement;
-
-        if (toInput && valueInput && dataInput) {
-          console.log('Found form elements:', { to: toInput.value, value: valueInput.value, data: dataInput.value });
-          this.txFormData = {
-            to: toInput.value,
-            value: valueInput.value,
-            data: dataInput.value
-          };
-        } else {
-          // No form data available
-          this.buffer.innerHTML = '';
-          const errorMsg = document.createElement('div');
-          errorMsg.innerHTML = `
-            <p class="text-yellow-400 mb-4">No transaction data found. Please create a transaction with :t first.</p>
-            <p class="text-gray-400">Steps to create a transaction:</p>
-            <ol class="list-decimal list-inside text-gray-400 ml-4 mt-2">
-              <li>Type :t to open the transaction form</li>
-              <li>Fill in the required fields</li>
-              <li>Click the "Save Transaction" button</li>
-              <li>Then use :p to prepare and sign the transaction</li>
-            </ol>
-          `;
-          this.buffer.appendChild(errorMsg);
-          return;
-        }
+      // Check if we have transaction data from the form
+      if (!this.txFormData || !this.txFormData.to) {
+        // No transaction data available
+        this.buffer.innerHTML = '';
+        const errorMsg = document.createElement('div');
+        errorMsg.innerHTML = `
+          <p class="text-yellow-400 mb-4">No transaction data found. Please create a transaction with :t first.</p>
+          <p class="text-gray-400">Steps to create a transaction:</p>
+          <ol class="list-decimal list-inside text-gray-400 ml-4 mt-2">
+            <li>Type :t to open the transaction form</li>
+            <li>Fill in the required fields</li>
+            <li>Use :p to prepare and sign the transaction</li>
+          </ol>
+        `;
+        this.buffer.appendChild(errorMsg);
+        return;
       }
 
       const { to: toAddress, value, data } = this.txFormData;
