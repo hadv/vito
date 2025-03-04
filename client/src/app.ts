@@ -39,7 +39,6 @@ class VimApp {
   private provider: ethers.JsonRpcProvider;
   private signClient: any; // WalletConnect SignClient instance
   private sessionTopic: string | null = null; // Store the WalletConnect session topic
-  private isModeSwitch: boolean = false;
   private cachedSafeInfo: SafeInfo | null = null;
   private selectedNetwork: NetworkConfig;
   private isConnecting: boolean = false; // Add flag to track connection state
@@ -55,19 +54,19 @@ class VimApp {
       name: 'mainnet',
       chainId: 1,
       provider: `https://eth-mainnet.g.alchemy.com/v2/${import.meta.env.VITE_ALCHEMY_API_KEY}`,
-      displayName: 'Ethereum Mainnet'
+      displayName: 'Ethereum'
     },
     arbitrum: {
       name: 'arbitrum',
       chainId: 42161,
       provider: `https://arb-mainnet.g.alchemy.com/v2/${import.meta.env.VITE_ALCHEMY_API_KEY}`,
-      displayName: 'Arbitrum One'
+      displayName: 'Arbitrum'
     },
     sepolia: {
       name: 'sepolia',
       chainId: 11155111,
       provider: `https://eth-sepolia.g.alchemy.com/v2/${import.meta.env.VITE_ALCHEMY_API_KEY}`,
-      displayName: 'Sepolia Testnet'
+      displayName: 'Sepolia'
     }
   };
 
@@ -309,10 +308,6 @@ class VimApp {
     }, 100);
   }
 
-  private showNetworkSelection(): void {
-    // Remove this method as it's no longer needed
-    // The network selection is now handled in showInitialInputContainer
-  }
 
   private async resolveEnsName(address: string): Promise<string | null> {
     try {
@@ -682,8 +677,6 @@ class VimApp {
         // Clear buffer before checking ownership
         this.buffer.innerHTML = '';
         
-        // Set flag for mode switch attempt
-        this.isModeSwitch = true;
         
         // Check if the signer is an owner
         if (this.cachedSafeInfo && this.cachedSafeInfo.owners.includes(this.signerAddress)) {
@@ -735,7 +728,6 @@ class VimApp {
   }
 
   private async executeCommand(): Promise<void> {
-    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
     this.buffer.className = 'flex-1 p-4 overflow-y-auto';
 
     // Clear the help screen and buffer before executing any command
@@ -1011,38 +1003,55 @@ class VimApp {
         input.rows = field.rows as number;
         input.className = 'w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent';
       } else if (field.type === 'combo') {
-        // Create input for address entry with datalist for suggestions
+        // Create input for address entry with custom dropdown
         input = document.createElement('input');
         input.type = 'text';
-      input.id = field.id;
-      input.className = 'w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent';
-      input.placeholder = field.placeholder;
-      if (field.required) input.required = true;
+        input.id = field.id;
+        input.className = 'block w-full rounded-md border-0 py-1.5 text-white shadow-sm ring-1 ring-inset ring-gray-700 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-blue-600 sm:text-sm sm:leading-6 bg-gray-700';
+        input.placeholder = field.placeholder;
+        if (field.required) input.required = true;
 
-        // Create datalist for owner suggestions
-        const datalist = document.createElement('datalist');
-        datalist.id = `${field.id}-list`;
+        // Create custom dropdown container
+        const dropdownContainer = document.createElement('div');
+        dropdownContainer.className = 'absolute z-10 mt-1 w-full overflow-auto rounded-md bg-gray-800 py-1 text-base shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none sm:text-sm hidden';
         
         // Add owner options if available
         if (this.cachedSafeInfo && this.cachedSafeInfo.owners.length > 0) {
           this.cachedSafeInfo.owners.forEach(owner => {
-            const option = document.createElement('option');
-            option.value = owner;
-            const ensName = this.cachedSafeInfo!.ensNames[owner];
-            option.label = ensName ? `${ensName} (${this.truncateAddress(owner)})` : owner;
-            datalist.appendChild(option);
+            const option = document.createElement('div');
+            option.className = 'relative cursor-pointer select-none py-2 pl-3 pr-9 text-gray-300 hover:bg-gray-700 hover:text-white text-left';
+            option.textContent = owner;
+            
+            option.addEventListener('click', () => {
+              input.value = owner;
+              this.txFormData!.to = owner;
+              dropdownContainer.classList.add('hidden');
+            });
+            
+            dropdownContainer.appendChild(option);
           });
         }
 
-        // Connect input to datalist
-        input.setAttribute('list', datalist.id);
-
-        // Add input event listener to update txFormData
+        // Add input event listener to update txFormData and show/hide dropdown
         input.addEventListener('input', () => {
           this.txFormData!.to = input.value;
+          dropdownContainer.classList.remove('hidden');
         });
 
-        // Add keydown event listener for : key
+        // Add focus/blur handlers for dropdown
+        input.addEventListener('focus', () => {
+          dropdownContainer.classList.remove('hidden');
+        });
+
+        // Close dropdown when clicking outside
+        document.addEventListener('click', (e) => {
+          if (!input.contains(e.target as Node) && !dropdownContainer.contains(e.target as Node)) {
+            dropdownContainer.classList.add('hidden');
+          }
+        });
+
+        // Add keydown event listener for : key and navigation
+        const vimApp = this; // Capture VimApp instance
         input.addEventListener('keydown', function(this: HTMLElement, e: Event) {
           const keyEvent = e as KeyboardEvent;
           if (keyEvent.key === ':') {
@@ -1051,12 +1060,41 @@ class VimApp {
             (document.getElementById('command-input') as HTMLInputElement)?.focus();
             (window as any).vimApp.command = ':';
             (window as any).vimApp.updateStatus();
+          } else if (keyEvent.key === 'ArrowDown' || keyEvent.key === 'ArrowUp') {
+            e.preventDefault();
+            const options = dropdownContainer.children;
+            const currentIndex = Array.from(options).findIndex(opt => opt.classList.contains('bg-gray-700'));
+            
+            if (keyEvent.key === 'ArrowDown') {
+              const nextIndex = currentIndex < options.length - 1 ? currentIndex + 1 : 0;
+              options[currentIndex]?.classList.remove('bg-gray-700');
+              options[nextIndex]?.classList.add('bg-gray-700');
+            } else {
+              const prevIndex = currentIndex > 0 ? currentIndex - 1 : options.length - 1;
+              options[currentIndex]?.classList.remove('bg-gray-700');
+              options[prevIndex]?.classList.add('bg-gray-700');
+            }
+          } else if (keyEvent.key === 'Enter') {
+            e.preventDefault();
+            const selectedOption = dropdownContainer.querySelector('.bg-gray-700');
+            if (selectedOption) {
+              input.value = selectedOption.textContent || '';
+              vimApp.txFormData!.to = input.value;
+              dropdownContainer.classList.add('hidden');
+            }
+          } else if (keyEvent.key === 'Escape') {
+            dropdownContainer.classList.add('hidden');
           }
         });
 
+        // Create a wrapper div for better styling
+        const inputWrapper = document.createElement('div');
+        inputWrapper.className = 'relative w-full';
+        inputWrapper.appendChild(input);
+        inputWrapper.appendChild(dropdownContainer);
+
         fieldContainer.appendChild(label);
-        fieldContainer.appendChild(input);
-        fieldContainer.appendChild(datalist);
+        fieldContainer.appendChild(inputWrapper);
         form.appendChild(fieldContainer);
         return;
               } else {
@@ -1116,75 +1154,44 @@ class VimApp {
     }, 100);
   }
 
-  private async prepareAndSignTransaction(): Promise<void> {
-    try {
-      // Check if we have transaction data from the form
-      if (!this.txFormData || !this.txFormData.to) {
-        // No transaction data available
-          this.buffer.innerHTML = '';
-          const errorMsg = document.createElement('div');
-          errorMsg.innerHTML = `
-            <p class="text-yellow-400 mb-4">No transaction data found. Please create a transaction with :t first.</p>
-            <p class="text-gray-400">Steps to create a transaction:</p>
-            <ol class="list-decimal list-inside text-gray-400 ml-4 mt-2">
-              <li>Type :t to open the transaction form</li>
-              <li>Fill in the required fields</li>
-            <li>Use :p to prepare and sign the transaction</li>
-            </ol>
-          `;
-          this.buffer.appendChild(errorMsg);
-          return;
-      }
+  private async calculateSafeTxHash(
+    to: string,
+    value: string,
+    data: string,
+    operation: number,
+    nonce: string,
+    chainId: number,
+    safeAddress: string
+  ): Promise<string> {
+    // Ensure data is properly formatted
+    const formattedData = data ? (data.startsWith('0x') ? data : `0x${data}`) : '0x';
+    
+    // Ensure value is properly formatted
+    const formattedValue = value ? 
+      (value.startsWith('0x') ? value : ethers.parseEther(value).toString()) : 
+      '0x0';
 
-      const { to: toAddress, value, data } = this.txFormData;
-      console.log('Using transaction data:', { toAddress, value, data });
+    // Prepare transaction object
+    const transaction = {
+      to,
+      value: formattedValue,
+      data: formattedData,
+      operation,
+      nonce,
+      safeTxGas: '0',
+      baseGas: '0',
+      gasPrice: '0',
+      gasToken: '0x0000000000000000000000000000000000000000',
+      refundReceiver: '0x0000000000000000000000000000000000000000',
+    };
 
-      if (!toAddress) {
-        throw new Error('To address is required');
-      }
-
-      if (!ethers.isAddress(toAddress)) {
-        throw new Error('Invalid to address');
-      }
-
-      // Show preparing message
-      this.buffer.innerHTML = '';
-      const preparingMsg = document.createElement('p');
-      preparingMsg.textContent = 'Preparing transaction...';
-      preparingMsg.className = 'text-blue-400';
-      this.buffer.appendChild(preparingMsg);
-
-      // Get the current nonce from the Safe contract
-      const safeContract = new ethers.Contract(
-        this.safeAddress!,
-        ['function nonce() view returns (uint256)'],
-        this.provider
-      );
-      const nonce = await safeContract.nonce();
-
-      // Create the Safe transaction data
-      const valueInWei = value ? ethers.parseEther(value) : 0n;
-      const safeTx = {
-        to: toAddress,
-        value: valueInWei.toString(),
-        data: data || '0x',
-        operation: 0, // Call operation
-        safeTxGas: '0',
-        baseGas: '0',
-        gasPrice: '0',
-        gasToken: '0x0000000000000000000000000000000000000000',
-        refundReceiver: '0x0000000000000000000000000000000000000000',
-        nonce: nonce.toString()
-      };
-
-      // Create the domain data for EIP-712 signing
-      const domain = {
-        chainId: this.selectedNetwork.chainId, // Use selected network's chainId
-        verifyingContract: this.safeAddress
-      };
-
-      // Define the types for EIP-712 signing
-      const types = {
+    // Prepare EIP-712 typed data
+    const typedData = {
+      types: {
+        EIP712Domain: [
+          { name: 'verifyingContract', type: 'address' },
+          { name: 'chainId', type: 'uint256' }
+        ],
         SafeTx: [
           { name: 'to', type: 'address' },
           { name: 'value', type: 'uint256' },
@@ -1197,302 +1204,265 @@ class VimApp {
           { name: 'refundReceiver', type: 'address' },
           { name: 'nonce', type: 'uint256' }
         ]
-      };
+      },
+      primaryType: 'SafeTx',
+      domain: {
+        verifyingContract: safeAddress,
+        chainId
+      },
+      message: transaction
+    };
 
-      // Create the typed data for signing
-      const typedData = {
-        types,
-        primaryType: 'SafeTx',
-        domain,
-        message: safeTx
-      };
+    // Calculate the safeTxHash using ethers.js
+    const safeTxHash = ethers.TypedDataEncoder.hash(
+      typedData.domain,
+      { SafeTx: typedData.types.SafeTx },
+      typedData.message
+    );
 
-      // Show signing message
-      const signingMsg = document.createElement('p');
-      signingMsg.textContent = 'Please sign the transaction...';
-      signingMsg.className = 'text-blue-400 mt-4';
-      this.buffer.appendChild(signingMsg);
+    return safeTxHash;
+  }
 
-      console.log('Requesting signature with typed data:', JSON.stringify(typedData, null, 2));
+  private async prepareAndSignTransaction() {
+    if (!this.safeAddress || !this.cachedSafeInfo) {
+      this.buffer.innerHTML = '';
+      const errorMsg = document.createElement('p');
+      errorMsg.textContent = 'Error: No Safe connected. Use :c to connect to a Safe first.';
+      errorMsg.className = 'text-red-500';
+      this.buffer.appendChild(errorMsg);
+      return;
+    }
 
-      // Request signature using WalletConnect v2
-      const signature = await this.signClient.request({
-        topic: this.sessionTopic!,
-        chainId: `eip155:${this.selectedNetwork.chainId}`, // Use selected network's chainId
-        request: {
-          method: 'eth_signTypedData_v4',
-          params: [
-            this.signerAddress!.toLowerCase(),
-            JSON.stringify(typedData)
-          ]
-        }
-      });
+    if (!this.txFormData || !this.txFormData.to) {
+      this.buffer.innerHTML = '';
+      const errorMsg = document.createElement('p');
+      errorMsg.textContent = 'No transaction data found. Please create a transaction with :t first.';
+      errorMsg.className = 'text-red-500';
+      this.buffer.appendChild(errorMsg);
+      return;
+    }
 
-      console.log('Received signature:', signature);
+    try {
+      // Validate transaction data
+      if (!ethers.isAddress(this.txFormData.to)) {
+        this.buffer.innerHTML = '';
+        const errorMsg = document.createElement('p');
+        errorMsg.textContent = 'Error: Invalid destination address';
+        errorMsg.className = 'text-red-500';
+        this.buffer.appendChild(errorMsg);
+        return;
+      }
 
-      // Calculate safeTxHash
-      const abiCoder = new ethers.AbiCoder();
-      const encodedData = abiCoder.encode(
-        ['address', 'uint256', 'bytes', 'uint8', 'uint256', 'uint256', 'uint256', 'address', 'address', 'uint256'],
-        [safeTx.to, safeTx.value, safeTx.data, safeTx.operation, safeTx.safeTxGas, safeTx.baseGas, safeTx.gasPrice, safeTx.gasToken, safeTx.refundReceiver, safeTx.nonce]
-      );
-      const safeTxHash = ethers.keccak256(encodedData);
+      // Convert value to hex if it's not already
+      const valueHex = this.txFormData.value ? 
+        (this.txFormData.value.startsWith('0x') ? 
+          this.txFormData.value : 
+          ethers.parseEther(this.txFormData.value).toString()) : 
+        '0x0';
+      
+      // Ensure data is hex
+      const dataHex = this.txFormData.data ? 
+        (this.txFormData.data.startsWith('0x') ? 
+          this.txFormData.data : 
+          `0x${this.txFormData.data}`) : 
+        '0x';
 
-      // Submit signature to the backend with network information
-      await new Promise<void>((resolve, reject) => {
-        const socket = this.socket;
-        
-        function cleanup() {
-          clearTimeout(timeout);
-          socket.off('signatureSubmitted');
-          socket.off('error');
-        }
-        
-        socket.once('signatureSubmitted', () => {
-          cleanup();
-          resolve();
-        });
-        
-        socket.once('error', (error: unknown) => {
-          cleanup();
-          const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-          reject(new Error(errorMessage));
-        });
-        
-        const timeout = setTimeout(() => {
-          cleanup();
-          reject(new Error('Signature submission timed out'));
-        }, 30000);
-        
-        // Emit the event with network information
-        socket.emit('submitSignature', {
+      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+
+      // Prepare transaction on backend
+      const response = await fetch(`${apiUrl}/safe/prepare-transaction`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
           safeAddress: this.safeAddress,
-          safeTxHash,
-          signature,
-          transaction: safeTx,
-          signerAddress: this.signerAddress,
-          network: this.selectedNetwork.name,
-          chainId: this.selectedNetwork.chainId
-        });
+          transaction: {
+            to: this.txFormData.to,
+            value: valueHex,
+            data: dataHex,
+            operation: 0
+          },
+          network: this.selectedNetwork.name
+        }),
       });
 
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Failed to prepare transaction');
+      }
+
+      const result = await response.json();
+      console.log('Received prepared transaction:', result);
+
+      // Calculate transaction hash using Safe transaction domain and EIP-712 format
+      const txHash = await this.calculateSafeTxHash(
+        this.txFormData.to,
+        this.txFormData.value,
+        this.txFormData.data,
+        0,
+        result.nonce,
+        this.selectedNetwork.chainId,
+        this.safeAddress
+      );
+      console.log('Calculated txHash:', txHash);
+
+      // Clear buffer and show signing request
+      this.buffer.innerHTML = '';
+      const signingContainer = document.createElement('div');
+      signingContainer.className = 'max-w-2xl mx-auto bg-gray-800 p-6 rounded-lg border border-gray-700 shadow-lg';
+      
+      const signingTitle = document.createElement('h3');
+      signingTitle.className = 'text-xl font-bold text-white mb-4';
+      signingTitle.textContent = 'Sign Transaction';
+      signingContainer.appendChild(signingTitle);
+
+      // Add transaction details
+      const detailsBox = document.createElement('div');
+      detailsBox.className = 'bg-gray-700 p-4 rounded-lg mb-4';
+      
+      const detailsTitle = document.createElement('h4');
+      detailsTitle.className = 'text-gray-300 font-medium mb-2';
+      detailsTitle.textContent = 'Transaction Details';
+      detailsBox.appendChild(detailsTitle);
+
+      const detailsList = document.createElement('ul');
+      detailsList.className = 'space-y-2 text-sm';
+      
+      // Add To address
+      const toItem = document.createElement('li');
+      toItem.className = 'flex justify-between items-center';
+      toItem.innerHTML = `
+        <span class="text-gray-400">To:</span>
+        <span class="font-mono text-gray-300">${this.txFormData.to}</span>
+      `;
+      detailsList.appendChild(toItem);
+
+      // Add Value
+      const valueItem = document.createElement('li');
+      valueItem.className = 'flex justify-between items-center';
+      valueItem.innerHTML = `
+        <span class="text-gray-400">Value:</span>
+        <span class="font-mono text-gray-300">${this.txFormData.value || '0'} ETH</span>
+      `;
+      detailsList.appendChild(valueItem);
+
+      // Add Data
+      const dataItem = document.createElement('li');
+      dataItem.className = 'flex justify-between items-center';
+      dataItem.innerHTML = `
+        <span class="text-gray-400">Data:</span>
+        <span class="font-mono text-gray-300">${this.txFormData.data || '0x'}</span>
+      `;
+      detailsList.appendChild(dataItem);
+
+      detailsBox.appendChild(detailsList);
+      signingContainer.appendChild(detailsBox);
+
+      // Add transaction hashes
+      const hashesBox = document.createElement('div');
+      hashesBox.className = 'bg-gray-700 p-4 rounded-lg mb-4';
+      
+      const hashesTitle = document.createElement('h4');
+      hashesTitle.className = 'text-gray-300 font-medium mb-2';
+      hashesTitle.textContent = 'Transaction Hashes';
+      hashesBox.appendChild(hashesTitle);
+
+      const hashesList = document.createElement('ul');
+      hashesList.className = 'space-y-2 text-sm';
+      
+      // Add Safe Transaction Hash with better formatting
+      const safeTxHashItem = document.createElement('li');
+      safeTxHashItem.className = 'flex flex-col space-y-1';
+      safeTxHashItem.innerHTML = `
+        <span class="text-gray-400">Safe Transaction Hash:</span>
+        <div class="font-mono text-xs break-all bg-gray-800 p-2 rounded border border-gray-600">${result.safeTxHash}</div>
+      `;
+      hashesList.appendChild(safeTxHashItem);
+
+      // Add Transaction Hash with better formatting
+      const txHashItem = document.createElement('li');
+      txHashItem.className = 'flex flex-col space-y-1';
+      txHashItem.innerHTML = `
+        <span class="text-gray-400">Calculated Transaction Hash:</span>
+        <div class="font-mono text-xs break-all bg-gray-800 p-2 rounded border border-gray-600">${txHash}</div>
+      `;
+      hashesList.appendChild(txHashItem);
+
+      // Add hash verification status
+      const verificationStatus = document.createElement('li');
+      verificationStatus.className = 'flex items-center space-x-2 mt-2';
+      const statusIndicator = document.createElement('div');
+      statusIndicator.className = 'w-2 h-2 rounded-full bg-green-500';
+      const statusText = document.createElement('span');
+      statusText.className = 'text-green-400 text-xs';
+      statusText.textContent = 'Transaction hashes verified';
+      verificationStatus.appendChild(statusIndicator);
+      verificationStatus.appendChild(statusText);
+      hashesList.appendChild(verificationStatus);
+
+      hashesBox.appendChild(hashesList);
+      signingContainer.appendChild(hashesBox);
+
+      const signingMsg = document.createElement('p');
+      signingMsg.textContent = 'Please sign the transaction in your wallet...';
+      signingMsg.className = 'text-blue-400 text-lg font-medium';
+      signingContainer.appendChild(signingMsg);
+
+      this.buffer.appendChild(signingContainer);
+
+      // Request signature using the typed data
+      const signature = await this.signMessage(JSON.stringify(result.typedData));
+      if (!signature) {
+        return;
+      }
+
+      // Send signature to backend
+      const signResponse = await fetch(`${apiUrl}/safe/send-transaction`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          safeAddress: this.safeAddress,
+          to: this.txFormData.to,
+          value: valueHex,
+          data: dataHex,
+          operation: 0,
+          network: this.selectedNetwork.name,
+          signature
+        }),
+      });
+
+      if (!signResponse.ok) {
+        throw new Error('Failed to sign transaction');
+      }
+
+      const signResult = await signResponse.json();
+      console.log('Server response after signing:', signResult);
+      
+      // Verify transaction hashes match
+      if (signResult.safeTxHash !== txHash) {
+        throw new Error('Transaction hash mismatch - security check failed');
+      }
+      
       // Show success message
       this.buffer.innerHTML = '';
       const successMsg = document.createElement('p');
       successMsg.textContent = 'Transaction signed successfully!';
-      successMsg.className = 'text-green-400';
+      successMsg.className = 'text-green-500';
       this.buffer.appendChild(successMsg);
 
-      // Refresh the transaction list after a short delay
-      setTimeout(() => {
-        this.command = ':l';
-        this.executeCommand();
-      }, 2000);
-
-    } catch (error: unknown) {
-      console.error('Transaction preparation/signing failed:', error);
+      // Clear form data
+      this.txFormData = null;
+      
+      // Focus command input
+      this.commandInput.focus();
+    } catch (error) {
+      console.error('Error preparing transaction:', error);
       this.buffer.innerHTML = '';
       const errorMsg = document.createElement('p');
-      errorMsg.textContent = `Error: ${error instanceof Error ? error.message : 'Unknown error'}`;
-      errorMsg.className = 'text-red-500';
-      this.buffer.appendChild(errorMsg);
-    }
-  }
-
-  private async executeTransaction(safeTxHash: string): Promise<void> {
-    try {
-      this.buffer.innerHTML = '';
-      const executingMsg = document.createElement('p');
-      executingMsg.textContent = 'Executing transaction...';
-      executingMsg.className = 'text-blue-400';
-      this.buffer.appendChild(executingMsg);
-
-      // Execute transaction using Socket.IO
-      const executionPromise = new Promise<any>((resolve, reject) => {
-        // Set up one-time listener for the response
-        this.socket.once('transactionExecuted', (data: any) => {
-          resolve(data);
-        });
-
-        // Set up error handler
-        this.socket.once('error', (error: unknown) => {
-          const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-          reject(new Error(errorMessage));
-        });
-
-        // Set timeout
-        const timeout = setTimeout(() => {
-          reject(new Error('Request timed out'));
-        }, 30000); // Longer timeout for execution
-
-        // Clean up on resolve/reject
-        const cleanup = () => {
-          clearTimeout(timeout);
-          this.socket.off('transactionExecuted');
-          this.socket.off('error');
-        };
-
-        Promise.resolve(executionPromise).then(cleanup, cleanup);
-
-        // Emit the event to execute transaction
-        this.socket.emit('executeTransaction', {
-          safeAddress: this.safeAddress,
-          safeTxHash
-        });
-      });
-
-      // Wait for the response
-      const result = await executionPromise;
-
-      // Show final success message
-      this.buffer.innerHTML = '';
-      const finalMsg = document.createElement('div');
-      finalMsg.className = 'space-y-4';
-      finalMsg.innerHTML = `
-        <p class="text-green-400">Transaction executed successfully!</p>
-        <p class="text-gray-300">Transaction hash: ${result.txHash}</p>
-        <p class="text-gray-300">You can track your transaction on Etherscan:</p>
-        <a href="https://etherscan.io/tx/${result.txHash}" target="_blank" rel="noopener noreferrer" 
-           class="text-blue-400 hover:text-blue-300 underline">
-          View on Etherscan
-        </a>
-      `;
-      this.buffer.appendChild(finalMsg);
-
-      // Refresh the transaction list after a short delay
-      setTimeout(() => {
-        this.command = ':l';
-        this.executeCommand();
-      }, 5000);
-
-    } catch (error: unknown) {
-      console.error('Transaction execution failed:', error);
-      this.buffer.innerHTML = '';
-      const errorMsg = document.createElement('p');
-      errorMsg.textContent = `Error: ${error instanceof Error ? error.message : 'Unknown error'}`;
-      errorMsg.className = 'text-red-500';
-      this.buffer.appendChild(errorMsg);
-    }
-  }
-
-  private async signTransaction(safeTxHash: string): Promise<void> {
-    try {
-      // Show signing message
-      this.buffer.innerHTML = '';
-      const signingMsg = document.createElement('p');
-      signingMsg.textContent = 'Please sign the transaction...';
-      signingMsg.className = 'text-blue-400';
-      this.buffer.appendChild(signingMsg);
-
-      // Get transaction details using Socket.IO
-      const txDetailsPromise = new Promise<any>((resolve, reject) => {
-        // Set up one-time listener for the response
-        this.socket.once('transactionDetails', (data: any) => {
-          resolve(data);
-        });
-
-        // Set up error handler
-        this.socket.once('error', (error: unknown) => {
-          const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-          reject(new Error(errorMessage));
-        });
-
-        // Set timeout
-        const timeout = setTimeout(() => {
-          reject(new Error('Request timed out'));
-        }, 10000);
-
-        // Clean up on resolve/reject
-        const cleanup = () => {
-          clearTimeout(timeout);
-          this.socket.off('transactionDetails');
-          this.socket.off('error');
-        };
-
-        Promise.resolve(txDetailsPromise).then(cleanup, cleanup);
-
-        // Emit the event to get transaction details
-        this.socket.emit('getTransactionDetails', { safeTxHash });
-      });
-
-      // Wait for the response
-      const txDetails = await txDetailsPromise;
-
-      // Request signature using WalletConnect
-      if (!this.signClient || !this.sessionTopic) {
-        throw new Error('WalletConnect session not found');
-      }
-
-      // Request signature
-      const signature = await this.signClient.request({
-        topic: this.sessionTopic,
-        chainId: 'eip155:1',
-        request: {
-          method: 'eth_signTypedData_v4',
-          params: [
-            this.signerAddress,
-            txDetails.typedData
-          ]
-        }
-      });
-
-      // Submit signature using Socket.IO
-      const signatureSubmittedPromise = new Promise<any>((resolve, reject) => {
-        // Set up one-time listener for the response
-        this.socket.once('signatureSubmitted', (data: any) => {
-          resolve(data);
-        });
-        
-        // Set up error handler
-        this.socket.once('error', (error: unknown) => {
-          const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-          reject(new Error(errorMessage));
-        });
-        
-        // Set timeout
-        const timeout = setTimeout(() => {
-          reject(new Error('Request timed out'));
-        }, 10000);
-        
-        // Clean up on resolve/reject
-        const cleanup = () => {
-          clearTimeout(timeout);
-          this.socket.off('signatureSubmitted');
-          this.socket.off('error');
-        };
-        
-        Promise.resolve(signatureSubmittedPromise).then(cleanup, cleanup);
-        
-        // Emit the event to submit signature
-        this.socket.emit('submitSignature', {
-          safeAddress: this.safeAddress,
-          safeTxHash,
-          signature,
-          signerAddress: this.signerAddress
-        });
-      });
-
-      // Wait for the response
-      await signatureSubmittedPromise;
-
-      // Show success message and refresh transaction list
-      this.buffer.innerHTML = '';
-      const successMsg = document.createElement('p');
-      successMsg.textContent = 'Transaction signed successfully!';
-      successMsg.className = 'text-green-400';
-      this.buffer.appendChild(successMsg);
-
-      // Refresh the transaction list after a short delay
-      setTimeout(() => {
-        this.command = ':l';
-        this.executeCommand();
-      }, 2000);
-
-    } catch (error: unknown) {
-      console.error('Error signing transaction:', error);
-      this.buffer.innerHTML = '';
-      const errorMsg = document.createElement('p');
-      errorMsg.textContent = `Error: ${error instanceof Error ? error.message : 'Unknown error'}`;
+      errorMsg.textContent = `Error: ${error instanceof Error ? error.message : 'Failed to prepare transaction'}`;
       errorMsg.className = 'text-red-500';
       this.buffer.appendChild(errorMsg);
     }
@@ -1660,14 +1630,24 @@ class VimApp {
     for (const owner of info.owners) {
       const ensName = info.ensNames[owner];
       const ownerItem = document.createElement('li');
-      ownerItem.className = 'text-gray-300 text-xs';
+      ownerItem.className = 'text-gray-300 text-xs bg-gray-700 p-2 rounded';
+      
+      // Add owner status indicator
+      const isCurrentSigner = this.signerAddress === owner;
+      const statusIndicator = document.createElement('div');
+      statusIndicator.className = `w-2 h-2 rounded-full ${isCurrentSigner ? 'bg-green-500' : 'bg-gray-500'} inline-block mr-2`;
+      
       if (ensName) {
         ownerItem.innerHTML = `
+          ${statusIndicator.outerHTML}
           <div class="text-blue-400 font-medium">${ensName}</div>
-          <div class="text-gray-400 font-mono break-all">${owner}</div>
+          <div class="text-gray-400 font-mono break-all text-[10px]">${owner}</div>
         `;
       } else {
-        ownerItem.innerHTML = `<div class="font-mono break-all">${owner}</div>`;
+        ownerItem.innerHTML = `
+          ${statusIndicator.outerHTML}
+          <div class="font-mono break-all text-[10px]">${owner}</div>
+        `;
       }
       ownersList.appendChild(ownerItem);
     }
@@ -1877,6 +1857,35 @@ class VimApp {
       this.commandInput.blur();
       setTimeout(() => this.commandInput.focus(), 100);
       throw error;
+    }
+  }
+
+  private async signMessage(message: string): Promise<string | null> {
+    try {
+      // Parse the typed data message
+      const typedData = JSON.parse(message);
+      
+      // Request signature using WalletConnect v2 with eth_signTypedData_v4
+      const signature = await this.signClient.request({
+        topic: this.sessionTopic!,
+        chainId: `eip155:${this.selectedNetwork.chainId}`,
+        request: {
+          method: 'eth_signTypedData_v4',
+          params: [
+            this.signerAddress!.toLowerCase(),
+            message
+          ]
+        }
+      });
+
+      return signature as string;
+    } catch (error) {
+      console.error('Error signing message:', error);
+      const errorMsg = document.createElement('p');
+      errorMsg.textContent = `Error: ${error instanceof Error ? error.message : 'Failed to sign message'}`;
+      errorMsg.className = 'text-red-500 mt-4';
+      this.buffer.appendChild(errorMsg);
+      return null;
     }
   }
 
