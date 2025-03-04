@@ -98,7 +98,7 @@ class VimApp {
 
     // Initialize event listeners first
     this.initEventListeners();
-    
+
     // Then show initial screen
     this.showInitialInputContainer();
     this.showHelpGuide();
@@ -281,7 +281,7 @@ class VimApp {
             errorMsg.className = 'text-red-500';
             this.buffer.appendChild(errorMsg);
           }
-        }
+    }
 
         // Focus command input after network selection
         setTimeout(() => {
@@ -447,7 +447,7 @@ class VimApp {
 
       // Update the Safe address display with ENS name if available
       if (this.safeAddressDisplay) {
-        const ensName = await this.resolveEnsName(safeAddress);
+      const ensName = await this.resolveEnsName(safeAddress);
         this.safeAddressDisplay.textContent = ensName 
           ? `${ensName} (${this.truncateAddress(safeAddress)})` 
           : this.truncateAddress(safeAddress);
@@ -471,9 +471,9 @@ class VimApp {
         this.safeAddressInput = null;
         this.networkSelect = null;
       }
-
-      // Clear the buffer and show success message
-      this.buffer.innerHTML = '';
+        
+        // Clear the buffer and show success message
+        this.buffer.innerHTML = '';
       const successMsg = document.createElement('p');
       successMsg.textContent = 'Successfully connected to Safe!';
       successMsg.className = 'text-green-400';
@@ -952,7 +952,7 @@ class VimApp {
   private showTransactionScreen(): void {
     // Clear existing content
     this.buffer.innerHTML = '';
-    this.buffer.className = 'flex-1 p-4 overflow-y-auto';
+      this.buffer.className = 'flex-1 p-4 overflow-y-auto';
 
     // Create transaction form container
     const formContainer = document.createElement('div');
@@ -1014,10 +1014,10 @@ class VimApp {
         // Create input for address entry with datalist for suggestions
         input = document.createElement('input');
         input.type = 'text';
-        input.id = field.id;
-        input.className = 'w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent';
-        input.placeholder = field.placeholder;
-        if (field.required) input.required = true;
+      input.id = field.id;
+      input.className = 'w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent';
+      input.placeholder = field.placeholder;
+      if (field.required) input.required = true;
 
         // Create datalist for owner suggestions
         const datalist = document.createElement('datalist');
@@ -1059,7 +1059,7 @@ class VimApp {
         fieldContainer.appendChild(datalist);
         form.appendChild(fieldContainer);
         return;
-      } else {
+              } else {
         input = document.createElement('input');
         input.type = field.type;
         input.className = 'w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent';
@@ -1092,7 +1092,7 @@ class VimApp {
         }
       });
 
-      fieldContainer.appendChild(label);
+        fieldContainer.appendChild(label);
       if (!field.type.includes('combo')) {
         fieldContainer.appendChild(input);
       }
@@ -1121,19 +1121,19 @@ class VimApp {
       // Check if we have transaction data from the form
       if (!this.txFormData || !this.txFormData.to) {
         // No transaction data available
-        this.buffer.innerHTML = '';
-        const errorMsg = document.createElement('div');
-        errorMsg.innerHTML = `
-          <p class="text-yellow-400 mb-4">No transaction data found. Please create a transaction with :t first.</p>
-          <p class="text-gray-400">Steps to create a transaction:</p>
-          <ol class="list-decimal list-inside text-gray-400 ml-4 mt-2">
-            <li>Type :t to open the transaction form</li>
-            <li>Fill in the required fields</li>
+          this.buffer.innerHTML = '';
+          const errorMsg = document.createElement('div');
+          errorMsg.innerHTML = `
+            <p class="text-yellow-400 mb-4">No transaction data found. Please create a transaction with :t first.</p>
+            <p class="text-gray-400">Steps to create a transaction:</p>
+            <ol class="list-decimal list-inside text-gray-400 ml-4 mt-2">
+              <li>Type :t to open the transaction form</li>
+              <li>Fill in the required fields</li>
             <li>Use :p to prepare and sign the transaction</li>
-          </ol>
-        `;
-        this.buffer.appendChild(errorMsg);
-        return;
+            </ol>
+          `;
+          this.buffer.appendChild(errorMsg);
+          return;
       }
 
       const { to: toAddress, value, data } = this.txFormData;
