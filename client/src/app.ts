@@ -1503,6 +1503,11 @@ class VimApp {
       const signResult = await signResponse.json();
       console.log('Server response after signing:', signResult);
       
+      // Verify transaction hashes match
+      if (signResult.safeTxHash !== result.safeTxHash) {
+        throw new Error('Transaction hash mismatch - security check failed');
+      }
+      
       // Show success message
       this.buffer.innerHTML = '';
       const successMsg = document.createElement('p');
