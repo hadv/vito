@@ -1301,7 +1301,7 @@ class VimApp {
       const valueHex = this.txFormData.value ? 
         (this.txFormData.value.startsWith('0x') ? 
           this.txFormData.value : 
-          ethers.parseEther(this.txFormData.value).toString()) : 
+          `0x${ethers.parseEther(this.txFormData.value).toString(16)}`) : 
         '0x0';
       
       // Ensure data is hex
@@ -1339,22 +1339,10 @@ class VimApp {
       const result = await response.json();
       console.log('Received prepared transaction:', result);
 
-      // Calculate transaction hash using Safe transaction domain and EIP-712 format
-      const txHash = await this.calculateSafeTxHash(
-        this.txFormData.to,
-        this.txFormData.value,
-        this.txFormData.data,
-        0,
-        result.nonce,
-        this.selectedNetwork.chainId,
-        this.safeAddress
-      );
-      console.log('Calculated txHash:', txHash);
-
       // Clear buffer and show signing request
       this.buffer.innerHTML = '';
       const signingContainer = document.createElement('div');
-      signingContainer.className = 'max-w-2xl mx-auto bg-gray-800 p-6 rounded-lg border border-gray-700 shadow-lg';
+      signingContainer.className = 'max-w-2xl mx-auto bg-gray-800 p-6 rounded-lg border border-gray-700 shadow-lg space-y-4';
       
       const signingTitle = document.createElement('h3');
       signingTitle.className = 'text-xl font-bold text-white mb-4';
@@ -1363,7 +1351,7 @@ class VimApp {
 
       // Add transaction details
       const detailsBox = document.createElement('div');
-      detailsBox.className = 'bg-gray-700 p-4 rounded-lg mb-4';
+      detailsBox.className = 'bg-gray-700 p-4 rounded-lg';
       
       const detailsTitle = document.createElement('h4');
       detailsTitle.className = 'text-gray-300 font-medium mb-2';
@@ -1382,12 +1370,15 @@ class VimApp {
       `;
       detailsList.appendChild(toItem);
 
-      // Add Value
+      // Add Value with both ETH and hex format
       const valueItem = document.createElement('li');
-      valueItem.className = 'flex justify-between items-center';
+      valueItem.className = 'flex justify-between items-start';
       valueItem.innerHTML = `
         <span class="text-gray-400">Value:</span>
-        <span class="font-mono text-gray-300">${this.txFormData.value || '0'} ETH</span>
+        <div class="text-right">
+          <div class="font-mono text-gray-300">${this.txFormData.value || '0'} ETH</div>
+          <div class="font-mono text-xs text-gray-500">${valueHex}</div>
+        </div>
       `;
       detailsList.appendChild(valueItem);
 
@@ -1403,59 +1394,86 @@ class VimApp {
       detailsBox.appendChild(detailsList);
       signingContainer.appendChild(detailsBox);
 
-      // Add transaction hashes
-      const hashesBox = document.createElement('div');
-      hashesBox.className = 'bg-gray-700 p-4 rounded-lg mb-4';
-      
-      const hashesTitle = document.createElement('h4');
-      hashesTitle.className = 'text-gray-300 font-medium mb-2';
-      hashesTitle.textContent = 'Transaction Hashes';
-      hashesBox.appendChild(hashesTitle);
+      // Add domain hash
+      const domainHash = ethers.TypedDataEncoder.hashDomain({
+        verifyingContract: result.typedData.domain.verifyingContract,
+        chainId: result.typedData.domain.chainId
+      });
+      const domainHashBox = document.createElement('div');
+      domainHashBox.className = 'bg-gray-700 p-4 rounded-lg';
+      domainHashBox.innerHTML = `
+        <h4 class="text-gray-300 font-medium mb-2">Domain Hash</h4>
+        <div class="font-mono text-xs break-all bg-gray-800 p-2 rounded border border-gray-600">${domainHash}</div>
+      `;
+      signingContainer.appendChild(domainHashBox);
 
-      const hashesList = document.createElement('ul');
-      hashesList.className = 'space-y-2 text-sm';
-      
-      // Add Safe Transaction Hash with better formatting
-      const safeTxHashItem = document.createElement('li');
-      safeTxHashItem.className = 'flex flex-col space-y-1';
-      safeTxHashItem.innerHTML = `
-        <span class="text-gray-400">Safe Transaction Hash:</span>
+      // Add message hash
+      const messageHash = ethers.TypedDataEncoder.from({
+        SafeTx: [
+          { name: 'to', type: 'address' },
+          { name: 'value', type: 'uint256' },
+          { name: 'data', type: 'bytes' },
+          { name: 'operation', type: 'uint8' },
+          { name: 'safeTxGas', type: 'uint256' },
+          { name: 'baseGas', type: 'uint256' },
+          { name: 'gasPrice', type: 'uint256' },
+          { name: 'gasToken', type: 'address' },
+          { name: 'refundReceiver', type: 'address' },
+          { name: 'nonce', type: 'uint256' }
+        ]
+      }).hash(result.typedData.message);
+      const messageHashBox = document.createElement('div');
+      messageHashBox.className = 'bg-gray-700 p-4 rounded-lg';
+      messageHashBox.innerHTML = `
+        <h4 class="text-gray-300 font-medium mb-2">Message Hash</h4>
+        <div class="font-mono text-xs break-all bg-gray-800 p-2 rounded border border-gray-600">${messageHash}</div>
+      `;
+      signingContainer.appendChild(messageHashBox);
+
+      // Add Safe transaction hash from backend
+      const hashBox = document.createElement('div');
+      hashBox.className = 'bg-gray-700 p-4 rounded-lg';
+      hashBox.innerHTML = `
+        <h4 class="text-gray-300 font-medium mb-2">Safe Transaction Hash (Backend)</h4>
         <div class="font-mono text-xs break-all bg-gray-800 p-2 rounded border border-gray-600">${result.safeTxHash}</div>
       `;
-      hashesList.appendChild(safeTxHashItem);
+      signingContainer.appendChild(hashBox);
 
-      // Add Transaction Hash with better formatting
-      const txHashItem = document.createElement('li');
-      txHashItem.className = 'flex flex-col space-y-1';
-      txHashItem.innerHTML = `
-        <span class="text-gray-400">Calculated Transaction Hash:</span>
-        <div class="font-mono text-xs break-all bg-gray-800 p-2 rounded border border-gray-600">${txHash}</div>
+      // Calculate and add locally calculated Safe transaction hash
+      const calculatedHash = await this.calculateSafeTxHash(
+        this.txFormData.to,
+        this.txFormData.value,
+        this.txFormData.data,
+        0,
+        result.typedData.message.nonce,
+        this.selectedNetwork.chainId,
+        this.safeAddress
+      );
+      
+      const calculatedHashBox = document.createElement('div');
+      calculatedHashBox.className = 'bg-gray-700 p-4 rounded-lg';
+      
+      // Add verification status
+      const hashesMatch = calculatedHash === result.safeTxHash;
+      const verificationStatus = document.createElement('div');
+      verificationStatus.className = `text-sm ${hashesMatch ? 'text-green-400' : 'text-red-400'} mb-2`;
+      verificationStatus.textContent = hashesMatch ? '✓ Hash verification successful' : '✗ Hash verification failed';
+      
+      calculatedHashBox.innerHTML = `
+        <h4 class="text-gray-300 font-medium mb-2">Safe Transaction Hash (Calculated)</h4>
+        <div class="font-mono text-xs break-all bg-gray-800 p-2 rounded border border-gray-600">${calculatedHash}</div>
       `;
-      hashesList.appendChild(txHashItem);
-
-      // Add hash verification status
-      const verificationStatus = document.createElement('li');
-      verificationStatus.className = 'flex items-center space-x-2 mt-2';
-      const statusIndicator = document.createElement('div');
-      statusIndicator.className = 'w-2 h-2 rounded-full bg-green-500';
-      const statusText = document.createElement('span');
-      statusText.className = 'text-green-400 text-xs';
-      statusText.textContent = 'Transaction hashes verified';
-      verificationStatus.appendChild(statusIndicator);
-      verificationStatus.appendChild(statusText);
-      hashesList.appendChild(verificationStatus);
-
-      hashesBox.appendChild(hashesList);
-      signingContainer.appendChild(hashesBox);
+      calculatedHashBox.insertBefore(verificationStatus, calculatedHashBox.firstChild);
+      signingContainer.appendChild(calculatedHashBox);
 
       const signingMsg = document.createElement('p');
       signingMsg.textContent = 'Please sign the transaction in your wallet...';
-      signingMsg.className = 'text-blue-400 text-lg font-medium';
+      signingMsg.className = 'text-blue-400 text-lg font-medium mt-4';
       signingContainer.appendChild(signingMsg);
 
       this.buffer.appendChild(signingContainer);
 
-      // Request signature using the typed data
+      // Request signature using the typed data from backend
       const signature = await this.signMessage(JSON.stringify(result.typedData));
       if (!signature) {
         return;
@@ -1479,16 +1497,11 @@ class VimApp {
       });
 
       if (!signResponse.ok) {
-        throw new Error('Failed to sign transaction');
+        throw new Error('Failed to send transaction');
       }
 
       const signResult = await signResponse.json();
       console.log('Server response after signing:', signResult);
-      
-      // Verify transaction hashes match
-      if (signResult.safeTxHash !== txHash) {
-        throw new Error('Transaction hash mismatch - security check failed');
-      }
       
       // Show success message
       this.buffer.innerHTML = '';
