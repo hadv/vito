@@ -2,22 +2,12 @@ import QRCode from 'qrcode';
 import { io, Socket } from 'socket.io-client';
 import { ethers } from 'ethers';
 import { SignClient } from '@walletconnect/sign-client';
-
-interface SafeInfo {
-  owners: string[];
-  threshold: number;
-  balance: string;
-  ensNames: { [address: string]: string | null };
-  network?: string;
-  chainId?: number;
-}
-
-interface NetworkConfig {
-  name: string;
-  chainId: number;
-  provider: string;
-  displayName: string;
-}
+import { SafeInfo } from './types/SafeInfo';
+import { NetworkConfig } from './types/NetworkConfig';
+import { calculateSafeTxHash } from './utils/safeTransactions';
+import { truncateAddress } from './utils/addressUtils';
+import { NETWORKS, DEFAULT_NETWORK, getNetworkConfig } from './config/networks';
+import { COMMANDS } from './config/commands';
 
 class VimApp {
   private buffer: HTMLDivElement;
@@ -49,27 +39,6 @@ class VimApp {
     data: string;
   } | null = null;
 
-  private readonly networks: { [key: string]: NetworkConfig } = {
-    mainnet: {
-      name: 'mainnet',
-      chainId: 1,
-      provider: `https://eth-mainnet.g.alchemy.com/v2/${import.meta.env.VITE_ALCHEMY_API_KEY}`,
-      displayName: 'Ethereum'
-    },
-    arbitrum: {
-      name: 'arbitrum',
-      chainId: 42161,
-      provider: `https://arb-mainnet.g.alchemy.com/v2/${import.meta.env.VITE_ALCHEMY_API_KEY}`,
-      displayName: 'Arbitrum'
-    },
-    sepolia: {
-      name: 'sepolia',
-      chainId: 11155111,
-      provider: `https://eth-sepolia.g.alchemy.com/v2/${import.meta.env.VITE_ALCHEMY_API_KEY}`,
-      displayName: 'Sepolia'
-    }
-  };
-
   constructor() {
     this.buffer = document.getElementById('buffer') as HTMLDivElement;
     this.statusBar = document.getElementById('status-bar') as HTMLDivElement;
@@ -83,8 +52,8 @@ class VimApp {
     this.signerAddressDisplay = document.getElementById('signer-address-display') as HTMLSpanElement;
     this.commandInput = document.getElementById('command-input') as HTMLInputElement;
 
-    // Set default network to mainnet
-    this.selectedNetwork = this.networks.mainnet;
+    // Set default network
+    this.selectedNetwork = getNetworkConfig(DEFAULT_NETWORK);
     
     // Initialize Ethereum provider for the selected network
     this.provider = new ethers.JsonRpcProvider(this.selectedNetwork.provider);
@@ -200,9 +169,9 @@ class VimApp {
           </div>
           <div class="flex-shrink-0 relative mt-4 sm:mt-0">
             <select id="network-select" class="block w-full sm:w-36 h-[58px] px-3 text-white bg-[#2c2c2c] border border-gray-700 rounded-lg focus:outline-none focus:ring-0 focus:border-blue-600 appearance-none cursor-pointer">
-              <option value="mainnet">Ethereum</option>
-              <option value="arbitrum">Arbitrum</option>
-              <option value="sepolia">Sepolia</option>
+              ${Object.entries(NETWORKS).map(([key, network]) => 
+                `<option value="${key}">${network.displayName}</option>`
+              ).join('')}
             </select>
             <div class="absolute inset-y-0 right-0 flex items-center pr-2 pointer-events-none">
               <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -298,7 +267,7 @@ class VimApp {
         this.clearSafeInfoCache();
         
         // Update network and provider
-        this.selectedNetwork = this.networks[selectedNetwork];
+        this.selectedNetwork = getNetworkConfig(selectedNetwork);
         this.provider = new ethers.JsonRpcProvider(this.selectedNetwork.provider);
         
         // If a Safe is connected, verify it exists on the new network
@@ -412,19 +381,7 @@ class VimApp {
     const commandsList = document.createElement('ul');
     commandsList.className = 'space-y-2';
 
-    const commands = [
-      { cmd: ':c', desc: 'Connect a Safe wallet' },
-      { cmd: ':i', desc: 'Display Safe information' },
-      { cmd: ':wc', desc: 'Connect a signer wallet via WalletConnect' },
-      { cmd: ':dc', desc: 'Disconnect the current signer wallet' },
-      { cmd: ':t', desc: 'Create a new transaction' },
-      { cmd: ':l', desc: 'List pending transactions' },
-      { cmd: ':q', desc: 'Clear the buffer screen' },
-      { cmd: ':d', desc: 'Disconnect the Safe wallet' },
-      { cmd: ':h', desc: 'Show this help guide' },
-    ];
-
-    commands.forEach(({ cmd, desc }) => {
+    COMMANDS.forEach(({ cmd, desc }) => {
       const commandItem = document.createElement('li');
       commandItem.className = 'text-gray-300 text-xs flex items-center gap-2';
       commandItem.innerHTML = `
@@ -484,8 +441,8 @@ class VimApp {
       if (this.safeAddressDisplay) {
         const ensName = await this.resolveEnsName(safeAddress);
         this.safeAddressDisplay.textContent = ensName 
-          ? `${ensName} (${this.truncateAddress(safeAddress)})` 
-          : this.truncateAddress(safeAddress);
+          ? `${ensName} (${truncateAddress(safeAddress)})` 
+          : truncateAddress(safeAddress);
       }
 
       // Clear URL parameters after successful connection
@@ -511,8 +468,8 @@ class VimApp {
         this.networkSelect = null;
       }
         
-        // Clear the buffer and show success message
-        this.buffer.innerHTML = '';
+      // Clear the buffer and show success message
+      this.buffer.innerHTML = '';
       const successMsg = document.createElement('p');
       successMsg.textContent = 'Successfully connected to Safe!';
       successMsg.className = 'text-green-400';
@@ -601,8 +558,8 @@ class VimApp {
     if (this.signerAddress) {
       const ensName = await this.resolveEnsName(this.signerAddress);
       this.signerAddressDisplay.textContent = ensName 
-        ? `${ensName} (${this.truncateAddress(this.signerAddress)})` 
-        : this.truncateAddress(this.signerAddress);
+        ? `${ensName} (${truncateAddress(this.signerAddress)})` 
+        : truncateAddress(this.signerAddress);
     } else {
       this.signerAddressDisplay.textContent = '';
     }
@@ -857,8 +814,8 @@ class VimApp {
       this.txFormData = null;
       this.mode = 'READ ONLY';
       
-      // Reset network to mainnet
-      this.selectedNetwork = this.networks.mainnet;
+      // Reset network to default
+      this.selectedNetwork = getNetworkConfig(DEFAULT_NETWORK);
       this.provider = new ethers.JsonRpcProvider(this.selectedNetwork.provider);
       
       // Clear displays
@@ -1215,56 +1172,17 @@ class VimApp {
       (value.startsWith('0x') ? value : ethers.parseEther(value).toString()) : 
       '0x0';
 
-    // Prepare transaction object
-    const transaction = {
-      to,
-      value: formattedValue,
-      data: formattedData,
-      operation,
-      nonce,
-      safeTxGas: '0',
-      baseGas: '0',
-      gasPrice: '0',
-      gasToken: '0x0000000000000000000000000000000000000000',
-      refundReceiver: '0x0000000000000000000000000000000000000000',
-    };
-
-    // Prepare EIP-712 typed data
-    const typedData = {
-      types: {
-        EIP712Domain: [
-          { name: 'verifyingContract', type: 'address' },
-          { name: 'chainId', type: 'uint256' }
-        ],
-        SafeTx: [
-          { name: 'to', type: 'address' },
-          { name: 'value', type: 'uint256' },
-          { name: 'data', type: 'bytes' },
-          { name: 'operation', type: 'uint8' },
-          { name: 'safeTxGas', type: 'uint256' },
-          { name: 'baseGas', type: 'uint256' },
-          { name: 'gasPrice', type: 'uint256' },
-          { name: 'gasToken', type: 'address' },
-          { name: 'refundReceiver', type: 'address' },
-          { name: 'nonce', type: 'uint256' }
-        ]
+    return calculateSafeTxHash(
+      {
+        to,
+        value: formattedValue,
+        data: formattedData,
+        operation,
+        nonce
       },
-      primaryType: 'SafeTx',
-      domain: {
-        verifyingContract: safeAddress,
-        chainId
-      },
-      message: transaction
-    };
-
-    // Calculate the safeTxHash using ethers.js
-    const safeTxHash = ethers.TypedDataEncoder.hash(
-      typedData.domain,
-      { SafeTx: typedData.types.SafeTx },
-      typedData.message
+      safeAddress,
+      chainId
     );
-
-    return safeTxHash;
   }
 
   private async prepareAndSignTransaction() {
@@ -1382,6 +1300,24 @@ class VimApp {
       `;
       detailsList.appendChild(valueItem);
 
+      // Add Operation
+      const operationItem = document.createElement('li');
+      operationItem.className = 'flex justify-between items-center';
+      operationItem.innerHTML = `
+        <span class="text-gray-400">Operation:</span>
+        <span class="font-mono text-gray-300">${result.typedData.message.operation === 0 ? '0 - Call' : '1 - DelegateCall'}</span>
+      `;
+      detailsList.appendChild(operationItem);
+
+      // Add Nonce
+      const nonceItem = document.createElement('li');
+      nonceItem.className = 'flex justify-between items-center';
+      nonceItem.innerHTML = `
+        <span class="text-gray-400">Nonce:</span>
+        <span class="font-mono text-gray-300">${result.typedData.message.nonce}</span>
+      `;
+      detailsList.appendChild(nonceItem);
+
       // Add Data
       const dataItem = document.createElement('li');
       dataItem.className = 'flex justify-between items-center';
@@ -1399,15 +1335,8 @@ class VimApp {
         verifyingContract: result.typedData.domain.verifyingContract,
         chainId: result.typedData.domain.chainId
       });
-      const domainHashBox = document.createElement('div');
-      domainHashBox.className = 'bg-gray-700 p-4 rounded-lg';
-      domainHashBox.innerHTML = `
-        <h4 class="text-gray-300 font-medium mb-2">Domain Hash</h4>
-        <div class="font-mono text-xs break-all bg-gray-800 p-2 rounded border border-gray-600">${domainHash}</div>
-      `;
-      signingContainer.appendChild(domainHashBox);
 
-      // Add message hash
+      // Calculate message hash
       const messageHash = ethers.TypedDataEncoder.from({
         SafeTx: [
           { name: 'to', type: 'address' },
@@ -1422,24 +1351,8 @@ class VimApp {
           { name: 'nonce', type: 'uint256' }
         ]
       }).hash(result.typedData.message);
-      const messageHashBox = document.createElement('div');
-      messageHashBox.className = 'bg-gray-700 p-4 rounded-lg';
-      messageHashBox.innerHTML = `
-        <h4 class="text-gray-300 font-medium mb-2">Message Hash</h4>
-        <div class="font-mono text-xs break-all bg-gray-800 p-2 rounded border border-gray-600">${messageHash}</div>
-      `;
-      signingContainer.appendChild(messageHashBox);
 
-      // Add Safe transaction hash from backend
-      const hashBox = document.createElement('div');
-      hashBox.className = 'bg-gray-700 p-4 rounded-lg';
-      hashBox.innerHTML = `
-        <h4 class="text-gray-300 font-medium mb-2">Safe Transaction Hash (Backend)</h4>
-        <div class="font-mono text-xs break-all bg-gray-800 p-2 rounded border border-gray-600">${result.safeTxHash}</div>
-      `;
-      signingContainer.appendChild(hashBox);
-
-      // Calculate and add locally calculated Safe transaction hash
+      // Calculate local Safe transaction hash
       const calculatedHash = await this.calculateSafeTxHash(
         this.txFormData.to,
         this.txFormData.value,
@@ -1450,21 +1363,52 @@ class VimApp {
         this.safeAddress
       );
       
-      const calculatedHashBox = document.createElement('div');
-      calculatedHashBox.className = 'bg-gray-700 p-4 rounded-lg';
+      // Create hash summary container
+      const hashSummaryBox = document.createElement('div');
+      hashSummaryBox.className = 'bg-gray-700 p-4 rounded-lg mt-4';
       
+      const hashSummaryTitle = document.createElement('h4');
+      hashSummaryTitle.className = 'text-gray-300 font-medium mb-2';
+      hashSummaryTitle.textContent = 'Transaction Hashes';
+
+      const hashSummaryList = document.createElement('div');
+      hashSummaryList.className = 'space-y-4';
+
+      // Display full hashes
+      const hashes = [
+        { label: 'Domain Hash', value: domainHash },
+        { label: 'Message Hash', value: messageHash },
+        { label: 'Safe Transaction Hash (Backend)', value: result.safeTxHash },
+        { label: 'Safe Transaction Hash (Calculated)', value: calculatedHash }
+      ];
+
+      hashes.forEach(({ label, value }) => {
+        const hashItem = document.createElement('div');
+        hashItem.className = 'bg-gray-800 p-3 rounded border border-gray-600';
+        
+        const labelDiv = document.createElement('div');
+        labelDiv.className = 'text-gray-400 text-sm mb-1';
+        labelDiv.textContent = label;
+        
+        const valueDiv = document.createElement('div');
+        valueDiv.className = 'font-mono text-sm text-gray-300 break-all';
+        valueDiv.textContent = value;
+        
+        hashItem.appendChild(labelDiv);
+        hashItem.appendChild(valueDiv);
+        hashSummaryList.appendChild(hashItem);
+      });
+
       // Add verification status
       const hashesMatch = calculatedHash === result.safeTxHash;
       const verificationStatus = document.createElement('div');
-      verificationStatus.className = `text-sm ${hashesMatch ? 'text-green-400' : 'text-red-400'} mb-2`;
+      verificationStatus.className = `text-sm ${hashesMatch ? 'text-green-400' : 'text-red-400'} mt-4`;
       verificationStatus.textContent = hashesMatch ? '✓ Hash verification successful' : '✗ Hash verification failed';
       
-      calculatedHashBox.innerHTML = `
-        <h4 class="text-gray-300 font-medium mb-2">Safe Transaction Hash (Calculated)</h4>
-        <div class="font-mono text-xs break-all bg-gray-800 p-2 rounded border border-gray-600">${calculatedHash}</div>
-      `;
-      calculatedHashBox.insertBefore(verificationStatus, calculatedHashBox.firstChild);
-      signingContainer.appendChild(calculatedHashBox);
+      hashSummaryBox.appendChild(hashSummaryTitle);
+      hashSummaryBox.appendChild(hashSummaryList);
+      hashSummaryBox.appendChild(verificationStatus);
+      signingContainer.appendChild(hashSummaryBox);
 
       const signingMsg = document.createElement('p');
       signingMsg.textContent = 'Please sign the transaction in your wallet...';
@@ -1532,10 +1476,6 @@ class VimApp {
 
   private updateTitle() {
     document.title = `Minimalist Safe{Wallet}`;
-  }
-
-  private truncateAddress(address: string): string {
-    return `${address.slice(0, 6)}...${address.slice(-6)}`;
   }
 
   private async loadAndCacheSafeInfo(): Promise<void> {
@@ -1890,15 +1830,15 @@ class VimApp {
       // Clear the buffer and show success message
       this.buffer.innerHTML = '';
       const successMessage = document.createElement('p');
-      successMessage.textContent = `Connected: ${ensName ? `${ensName} (${this.truncateAddress(address)})` : this.truncateAddress(address)}`;
+      successMessage.textContent = `Connected: ${ensName ? `${ensName} (${truncateAddress(address)})` : truncateAddress(address)}`;
       successMessage.className = 'text-green-400';
       this.buffer.appendChild(successMessage);
       this.buffer.className = 'flex-1 p-4 overflow-y-auto';
       
       // Update signer address display with truncated address
       this.signerAddressDisplay.textContent = ensName 
-        ? `${ensName} (${this.truncateAddress(address)})` 
-        : this.truncateAddress(address);
+        ? `${ensName} (${truncateAddress(address)})` 
+        : truncateAddress(address);
       
       // Reset command state and focus the command input
       this.command = '';
