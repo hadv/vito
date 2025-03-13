@@ -13,4 +13,6 @@ export const COMMANDS: Command[] = [
   { cmd: ':q', desc: 'Clear the buffer screen' },
   { cmd: ':d', desc: 'Disconnect the Safe wallet' },
   { cmd: ':h', desc: 'Show this help guide' },
+  { cmd: ':p', desc: 'Prepare and sign a transaction' },
+  { cmd: ':pool', desc: 'Propose transaction to SafeTxPool' },
 ]; 
