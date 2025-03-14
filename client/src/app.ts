@@ -9,6 +9,7 @@ import { truncateAddress } from './utils/addressUtils';
 import { NETWORKS, DEFAULT_NETWORK, getNetworkConfig } from './config/networks';
 import { COMMANDS } from './config/commands';
 import { getContractAddress } from './config/contracts';
+import { SafeTxPool } from './utils/safeTransactionManager';
 
 class VimApp {
   private buffer: HTMLDivElement;
@@ -241,7 +242,7 @@ class VimApp {
         setTimeout(() => {
           if (this.safeAddressInput) {
             this.safeAddressInput.disabled = false;
-            this.commandInput.focus();
+          this.commandInput.focus();
           }
         }, 100);
       });
@@ -832,6 +833,221 @@ class VimApp {
     } else if (this.command === ':h') {
       // Show help guide
       this.showHelpGuide();
+    } else if (this.command === ':l') {
+      if (!this.safeAddress) {
+        this.buffer.textContent = 'Please connect a Safe address with :c first';
+        this.buffer.className = 'flex-1 p-4 overflow-y-auto text-yellow-400';
+        return;
+      }
+
+      try {
+        // Get contract address for the current network
+        const contractAddresses = getContractAddress(this.selectedNetwork);
+        const safeTxPool = new SafeTxPool(contractAddresses.safeTxPool, this.selectedNetwork);
+        
+        // Get pending transactions
+        const pendingTxHashes = await safeTxPool.getPendingTransactions(this.safeAddress);
+        
+        if (pendingTxHashes.length === 0) {
+          this.buffer.innerHTML = `
+            <div class="max-w-4xl mx-auto bg-gray-800 p-6 rounded-lg border border-gray-700 shadow-lg">
+              <p class="text-gray-400">No pending transactions found</p>
+            </div>
+          `;
+          return;
+        }
+
+        // Create container for transactions table
+        const container = document.createElement('div');
+        container.className = 'max-w-4xl mx-auto';
+        container.setAttribute('tabindex', '0'); // Make container focusable
+        
+        // Create table
+        const table = document.createElement('div');
+        table.className = 'min-w-full bg-gray-800 rounded-lg border border-gray-700 shadow-lg overflow-hidden';
+        table.id = 'tx-table';
+
+        // Table header
+        const header = document.createElement('div');
+        header.className = 'bg-gray-900 px-4 py-3 border-b border-gray-700';
+        header.innerHTML = `
+          <div class="grid grid-cols-12 gap-4 text-xs font-medium text-gray-400">
+            <div class="col-span-3">Hash</div>
+            <div class="col-span-3">To</div>
+            <div class="col-span-2">Value</div>
+            <div class="col-span-1">Nonce</div>
+            <div class="col-span-2">Proposer</div>
+            <div class="col-span-1">Sigs</div>
+          </div>
+        `;
+        table.appendChild(header);
+
+        // Store transaction details for later use
+        const txDetailsMap = new Map();
+        let currentFocusIndex = 0;
+
+        // Fetch and display details for each transaction
+        for (const [index, txHash] of pendingTxHashes.entries()) {
+          const txDetails = await safeTxPool.getTransactionDetails(txHash);
+          txDetailsMap.set(txHash, txDetails);
+          const valueInEth = ethers.formatEther(txDetails.value);
+          
+          const row = document.createElement('div');
+          row.className = 'px-4 py-3 border-b border-gray-700 hover:bg-gray-700/50 cursor-pointer';
+          row.setAttribute('data-tx-hash', txHash);
+          row.setAttribute('data-index', index.toString());
+          row.innerHTML = `
+            <div class="grid grid-cols-12 gap-4 text-xs">
+              <div class="col-span-3 font-mono text-blue-400">${truncateAddress(txHash)}</div>
+              <div class="col-span-3 font-mono text-gray-300">${truncateAddress(txDetails.to)}</div>
+              <div class="col-span-2 text-gray-300">${Number(valueInEth) > 0 ? `${valueInEth} ETH` : '-'}</div>
+              <div class="col-span-1 text-gray-300">${txDetails.nonce}</div>
+              <div class="col-span-2 font-mono text-gray-300">${truncateAddress(txDetails.proposer)}</div>
+              <div class="col-span-1 text-gray-300">${txDetails.signatures.length}</div>
+            </div>
+          `;
+          
+          // Add click handler for toggle functionality
+          row.addEventListener('click', (e) => {
+            e.stopPropagation();
+            showTxDetails(txHash);
+          });
+
+          table.appendChild(row);
+        }
+
+        container.appendChild(table);
+        
+        // Add help text
+        const helpText = document.createElement('p');
+        helpText.className = 'text-center text-gray-400 text-xs mt-4';
+        helpText.textContent = 'Use ↑/↓ keys to navigate, Enter to view details, Esc to collapse details';
+        container.appendChild(helpText);
+
+        // Clear and update buffer
+        this.buffer.innerHTML = '';
+        this.buffer.appendChild(container);
+
+        // Focus the container
+        container.focus();
+
+        // Function to show transaction details
+        const showTxDetails = (txHash: string) => {
+          // Check if details for this transaction are already open
+          const existingDetails = document.querySelector('.tx-details');
+          const clickedRow = document.querySelector(`[data-tx-hash="${txHash}"]`);
+          
+          // If details exist and belong to the clicked row, close them (toggle off)
+          if (existingDetails && clickedRow && existingDetails.previousElementSibling === clickedRow) {
+            existingDetails.remove();
+            return;
+          }
+          
+          // Remove any existing details row
+          if (existingDetails) {
+            existingDetails.remove();
+          }
+
+          const txDetails = txDetailsMap.get(txHash);
+          const row = document.querySelector(`[data-tx-hash="${txHash}"]`);
+          
+          if (row && txDetails) {
+            const detailsRow = document.createElement('div');
+            detailsRow.className = 'px-4 py-3 bg-gray-900/50 tx-details';
+            detailsRow.innerHTML = `
+              <div class="space-y-2 text-xs">
+                <div class="grid grid-cols-2 gap-4">
+                  <div>
+                    <span class="text-gray-400">Full Hash:</span>
+                    <span class="text-gray-300 font-mono break-all">${txHash}</span>
+                  </div>
+                  <div>
+                    <span class="text-gray-400">Full To:</span>
+                    <span class="text-gray-300 font-mono break-all">${txDetails.to}</span>
+                  </div>
+                </div>
+                ${txDetails.data !== '0x' ? `
+                  <div>
+                    <span class="text-gray-400">Data:</span>
+                    <span class="text-gray-300 font-mono break-all">${txDetails.data}</span>
+                  </div>
+                ` : ''}
+                <div>
+                  <span class="text-gray-400">Signatures:</span>
+                  <div class="pl-4 space-y-1">
+                    ${txDetails.signatures.map((sig: string) => 
+                      `<span class="text-gray-300 font-mono break-all">${sig}</span>`
+                    ).join('<br>')}
+                  </div>
+                </div>
+              </div>
+            `;
+            
+            row.parentNode?.insertBefore(detailsRow, row.nextElementSibling);
+          }
+        };
+
+        // Function to update focus
+        const updateFocus = (index: number) => {
+          // Remove focus from all rows
+          document.querySelectorAll('#tx-table > div:not(:first-child)').forEach(row => {
+            row.classList.remove('bg-gray-700');
+          });
+          
+          // Add focus to current row
+          const currentRow = document.querySelector(`[data-index="${index}"]`);
+          if (currentRow) {
+            currentRow.classList.add('bg-gray-700');
+            currentRow.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+          }
+        };
+
+        // Add keyboard navigation
+        container.addEventListener('keydown', (e: KeyboardEvent) => {
+          const totalTx = pendingTxHashes.length;
+          
+          switch (e.key) {
+            case 'ArrowUp':
+              e.preventDefault();
+              currentFocusIndex = Math.max(0, currentFocusIndex - 1);
+              updateFocus(currentFocusIndex);
+              break;
+              
+            case 'ArrowDown':
+              e.preventDefault();
+              currentFocusIndex = Math.min(totalTx - 1, currentFocusIndex + 1);
+              updateFocus(currentFocusIndex);
+              break;
+              
+            case 'Enter':
+              e.preventDefault();
+              const selectedTxHash = pendingTxHashes[currentFocusIndex];
+              if (selectedTxHash) {
+                showTxDetails(selectedTxHash);
+              }
+              break;
+              
+            case 'Escape':
+              e.preventDefault();
+              const existingDetails = document.querySelector('.tx-details');
+              if (existingDetails) {
+                existingDetails.remove();
+              }
+              break;
+          }
+        });
+
+        // Set initial focus
+        updateFocus(0);
+
+      } catch (error) {
+        console.error('Failed to fetch pending transactions:', error);
+        this.buffer.innerHTML = '';
+        const errorMsg = document.createElement('p');
+        errorMsg.textContent = `Error: ${error instanceof Error ? error.message : 'Unknown error'}`;
+        errorMsg.className = 'text-red-500';
+        this.buffer.appendChild(errorMsg);
+      }
     } else if (this.command === ':t') {
       if (this.mode !== 'TX') {
         this.buffer.textContent = 'Please switch to TX mode first by pressing "e" key';
@@ -1210,7 +1426,7 @@ class VimApp {
       }
 
       if (!this.safeAddress || !this.cachedSafeInfo) {
-        this.buffer.innerHTML = '';
+      this.buffer.innerHTML = '';
         const errorMsg = document.createElement('p');
         errorMsg.textContent = 'Error: No Safe connected. Use :c to connect to a Safe first.';
         errorMsg.className = 'text-red-500';
@@ -1219,11 +1435,11 @@ class VimApp {
       }
 
       if (!this.signClient || !this.sessionTopic || !this.signerAddress) {
-        this.buffer.innerHTML = '';
-        const errorMsg = document.createElement('p');
+      this.buffer.innerHTML = '';
+      const errorMsg = document.createElement('p');
         errorMsg.textContent = 'Error: No wallet connected. Use :wc to connect a wallet first.';
-        errorMsg.className = 'text-red-500';
-        this.buffer.appendChild(errorMsg);
+      errorMsg.className = 'text-red-500';
+      this.buffer.appendChild(errorMsg);
         return;
       }
 
@@ -1269,70 +1485,29 @@ class VimApp {
         this.safeAddress
       );
 
-      // Show preview before sending
-      this.buffer.innerHTML = '';
-      const previewMsg = document.createElement('div');
-      previewMsg.className = 'max-w-2xl mx-auto space-y-4';
+      // Encode function data for the transaction to display in UI
+      const iface = new ethers.Interface([
+        "function proposeTx(bytes32 safeTxHash, address safe, address to, uint256 value, bytes data, uint8 operation, uint256 nonce) external returns (bool)"
+      ]);
 
-      // Transaction Details Section
-      const txDetailsSection = document.createElement('div');
-      txDetailsSection.className = 'bg-gray-800 p-6 rounded-lg border border-gray-700 shadow-lg';
-      txDetailsSection.innerHTML = `
-        <h3 class="text-xl font-bold text-white mb-4">Transaction Preview</h3>
-        <div class="space-y-4">
-          <div class="bg-gray-900 p-4 rounded-lg">
-            <h4 class="text-sm font-medium text-gray-400 mb-2">Contract Details</h4>
-            <div class="space-y-2 font-mono text-sm">
-              <p class="flex justify-between">
-                <span class="text-gray-500">Contract:</span>
-                <span class="text-gray-300">${contractAddresses.safeTxPool}</span>
-              </p>
-              <p class="flex justify-between">
-                <span class="text-gray-500">Function:</span>
-                <span class="text-gray-300">proposeTx</span>
-              </p>
-            </div>
-          </div>
+      const encodedTxData = iface.encodeFunctionData("proposeTx", [
+        safeTxHash,
+        this.safeAddress,
+        localTxData.to,
+        BigInt(valueHex),
+        dataHex,
+        0,
+        BigInt(nonce)
+      ]);
 
-          <div class="bg-gray-900 p-4 rounded-lg">
-            <h4 class="text-sm font-medium text-gray-400 mb-2">Transaction Parameters</h4>
-            <div class="space-y-2 font-mono text-sm">
-              <p class="flex justify-between">
-                <span class="text-gray-500">Safe:</span>
-                <span class="text-gray-300">${this.safeAddress}</span>
-              </p>
-              <p class="flex justify-between">
-                <span class="text-gray-500">Target:</span>
-                <span class="text-gray-300">${localTxData.to}</span>
-              </p>
-              <p class="flex justify-between">
-                <span class="text-gray-500">Value:</span>
-                <span class="text-gray-300">${ethers.formatEther(valueHex)} ETH</span>
-              </p>
-              <p class="flex justify-between">
-                <span class="text-gray-500">Operation:</span>
-                <span class="text-gray-300">0 (Call)</span>
-              </p>
-              <p class="flex justify-between">
-                <span class="text-gray-500">Nonce:</span>
-                <span class="text-gray-300">${nonce}</span>
-              </p>
-            </div>
-          </div>
+      // Decode the transaction data for display
+      const decodedData = iface.parseTransaction({ data: encodedTxData });
+      if (!decodedData) {
+        throw new Error('Failed to decode transaction data');
+      }
+      const functionName = decodedData.name;
+      const args = decodedData.args;
 
-          <div class="bg-gray-900 p-4 rounded-lg">
-            <h4 class="text-sm font-medium text-gray-400 mb-2">Transaction Data</h4>
-            <div class="font-mono text-sm break-all text-gray-300">
-              ${dataHex}
-            </div>
-          </div>
-        </div>
-      `;
-
-      // Hash Verification Section
-      const hashSection = document.createElement('div');
-      hashSection.className = 'bg-gray-800 p-6 rounded-lg border border-gray-700 shadow-lg';
-      
       // Calculate our hash for comparison
       const calculatedHash = await calculateSafeTxHash(
         {
@@ -1347,21 +1522,49 @@ class VimApp {
       );
 
       const hashVerification = safeTxHash === calculatedHash;
-      
-      hashSection.innerHTML = `
-        <h3 class="text-xl font-bold text-white mb-4">Hash Verification</h3>
+
+      // Create a more detailed transaction summary
+      const detailedSummary = document.createElement('div');
+      detailedSummary.className = 'max-w-2xl mx-auto bg-gray-800 p-6 rounded-lg border border-gray-700 shadow-lg mb-4';
+      detailedSummary.innerHTML = `
+        <h3 class="text-xl font-bold text-white mb-4">Transaction Details</h3>
         <div class="space-y-4">
           <div class="bg-gray-900 p-4 rounded-lg">
-            <h4 class="text-sm font-medium text-gray-400 mb-2">Safe Contract Hash</h4>
-            <div class="font-mono text-sm break-all text-gray-300">
-              ${safeTxHash}
-            </div>
+            <h4 class="text-sm font-medium text-gray-400 mb-2">Function Call</h4>
+            <p class="font-mono text-sm text-blue-400">${functionName}</p>
           </div>
-
+          
           <div class="bg-gray-900 p-4 rounded-lg">
-            <h4 class="text-sm font-medium text-gray-400 mb-2">Calculated Hash</h4>
-            <div class="font-mono text-sm break-all text-gray-300">
-              ${calculatedHash}
+            <h4 class="text-sm font-medium text-gray-400 mb-2">Arguments</h4>
+            <div class="space-y-2 font-mono text-sm">
+              <div class="grid grid-cols-3 gap-2">
+                <span class="text-gray-500">Safe Tx Hash:</span>
+                <span class="text-gray-300 col-span-2 break-all">${args[0]}</span>
+              </div>
+              <div class="grid grid-cols-3 gap-2">
+                <span class="text-gray-500">Safe:</span>
+                <span class="text-gray-300 col-span-2 break-all">${args[1]}</span>
+              </div>
+              <div class="grid grid-cols-3 gap-2">
+                <span class="text-gray-500">To:</span>
+                <span class="text-gray-300 col-span-2 break-all">${args[2]}</span>
+              </div>
+              <div class="grid grid-cols-3 gap-2">
+                <span class="text-gray-500">Value:</span>
+                <span class="text-gray-300 col-span-2">${ethers.formatEther(args[3])} ETH</span>
+              </div>
+              <div class="grid grid-cols-3 gap-2">
+                <span class="text-gray-500">Data:</span>
+                <span class="text-gray-300 col-span-2 break-all">${args[4]}</span>
+              </div>
+              <div class="grid grid-cols-3 gap-2">
+                <span class="text-gray-500">Operation:</span>
+                <span class="text-gray-300 col-span-2">${args[5]} (Call)</span>
+              </div>
+              <div class="grid grid-cols-3 gap-2">
+                <span class="text-gray-500">Nonce:</span>
+                <span class="text-gray-300 col-span-2">${args[6]}</span>
+              </div>
             </div>
           </div>
 
@@ -1378,12 +1581,17 @@ class VimApp {
               </span>
             </div>
           </div>
+
+          <div class="bg-gray-900 p-4 rounded-lg">
+            <h4 class="text-sm font-medium text-gray-400 mb-2">Raw Transaction Data</h4>
+            <p class="font-mono text-xs text-gray-300 break-all">${encodedTxData}</p>
+          </div>
         </div>
       `;
 
-      previewMsg.appendChild(txDetailsSection);
-      previewMsg.appendChild(hashSection);
-      this.buffer.appendChild(previewMsg);
+      // Clear previous content and show the detailed summary
+      this.buffer.innerHTML = '';
+      this.buffer.appendChild(detailedSummary);
 
       // If hash verification fails, show warning and return
       if (!hashVerification) {
@@ -1402,40 +1610,71 @@ class VimApp {
         return;
       }
 
-      // Encode function data for the transaction
-      const iface = new ethers.Interface([
-        "function proposeTx(bytes32 safeTxHash, address safe, address to, uint256 value, bytes data, uint8 operation, uint256 nonce) external returns (bool)"
-      ]);
-
-      const encodedTxData = iface.encodeFunctionData("proposeTx", [
-        safeTxHash,
-        this.safeAddress,
-        localTxData.to,
-        BigInt(valueHex),
-        dataHex,
-        0,
-        BigInt(nonce)
-      ]);
-
-      // Create a unique request ID
-      const requestId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-
-      // Prepare the transaction request with unique ID
+      // Prepare the transaction request with explicit function data
       const request = {
         topic: this.sessionTopic,
         chainId: `eip155:${this.selectedNetwork.chainId}`,
         request: {
-          id: requestId,
+          id: Math.floor(Math.random() * 1000000),
           jsonrpc: '2.0',
           method: 'eth_sendTransaction',
           params: [{
             from: this.signerAddress,
             to: contractAddresses.safeTxPool,
             data: encodedTxData,
-            value: "0x0"
+            value: "0x0",
+            gasLimit: "0x55730",
+            maxFeePerGas: "0x2540be400",  // 10 Gwei
+            maxPriorityFeePerGas: "0x3b9aca00"  // 1 Gwei
           }]
         }
       };
+
+      // Add transaction summary to the UI before sending
+      const txSummary = document.createElement('div');
+      txSummary.className = 'max-w-2xl mx-auto mt-4 bg-blue-900/50 p-6 rounded-lg border border-blue-700 shadow-lg';
+      txSummary.innerHTML = `
+        <div class="flex items-center gap-3 mb-4">
+          <svg class="w-6 h-6 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+          </svg>
+          <h3 class="text-lg font-semibold text-blue-100">Waiting for Wallet Confirmation</h3>
+        </div>
+        <div class="bg-blue-900/50 p-4 rounded-lg space-y-3">
+          <p class="text-blue-200 text-sm">Please confirm the transaction in your wallet. You will be proposing:</p>
+          <div class="space-y-2 font-mono text-sm">
+            <p class="flex justify-between">
+              <span class="text-blue-400">Function:</span>
+              <span class="text-blue-200">proposeTx()</span>
+            </p>
+            <p class="flex justify-between">
+              <span class="text-blue-400">Contract:</span>
+              <span class="text-blue-200">${truncateAddress(contractAddresses.safeTxPool)}</span>
+            </p>
+            <p class="flex justify-between">
+              <span class="text-blue-400">Safe:</span>
+              <span class="text-blue-200">${truncateAddress(this.safeAddress)}</span>
+            </p>
+            <p class="flex justify-between">
+              <span class="text-blue-400">To:</span>
+              <span class="text-blue-200">${truncateAddress(localTxData.to)}</span>
+            </p>
+            <p class="flex justify-between">
+              <span class="text-blue-400">Value:</span>
+              <span class="text-blue-200">${ethers.formatEther(valueHex)} ETH</span>
+            </p>
+            <p class="flex justify-between">
+              <span class="text-blue-400">Nonce:</span>
+              <span class="text-blue-200">${nonce}</span>
+            </p>
+            <p class="flex justify-between">
+              <span class="text-blue-400">Hash:</span>
+              <span class="text-blue-200">${truncateAddress(safeTxHash)}</span>
+            </p>
+          </div>
+        </div>
+      `;
+      this.buffer.appendChild(txSummary);
 
       // Send the transaction with proper error handling
       let txHash;
@@ -1446,9 +1685,90 @@ class VimApp {
         if (!txHash || typeof txHash !== 'string') {
           throw new Error('Invalid transaction hash received');
         }
-      } catch (error) {
+      } catch (error: any) {
         console.error('Transaction request failed:', error);
-        throw error;
+        
+        // Handle user rejection
+        if (error?.message?.toLowerCase().includes('rejected') || 
+            error?.message?.toLowerCase().includes('user denied')) {
+          
+          // Show user-friendly rejection message
+          this.buffer.innerHTML = '';
+          const rejectionMsg = document.createElement('div');
+          rejectionMsg.className = 'max-w-2xl mx-auto bg-yellow-900/50 p-6 rounded-lg border border-yellow-700 shadow-lg';
+          rejectionMsg.innerHTML = `
+            <div class="flex items-center gap-3 mb-4">
+              <svg class="w-6 h-6 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+              </svg>
+              <h3 class="text-lg font-semibold text-yellow-100">Transaction Cancelled</h3>
+            </div>
+            <p class="text-yellow-100 mb-4">You've rejected the transaction from your wallet.</p>
+            <div class="bg-yellow-900/50 p-4 rounded-lg text-sm">
+              <p class="text-yellow-200 mb-2">What you can do next:</p>
+              <ul class="list-disc list-inside text-yellow-100 space-y-1">
+                <li>Review the transaction details and try again</li>
+                <li>Use :t to create a new transaction</li>
+                <li>Use :l to view pending transactions</li>
+              </ul>
+            </div>
+          `;
+          this.buffer.appendChild(rejectionMsg);
+          return;
+        }
+        
+        // Handle session errors
+        if (error?.message?.includes('session topic') || 
+            error?.message?.includes('No matching key') ||
+            error?.message?.includes('expired')) {
+          this.sessionTopic = null;
+          this.signerAddress = null;
+          this.signerAddressDisplay.textContent = '';
+          
+          this.buffer.innerHTML = '';
+          const reconnectMsg = document.createElement('div');
+          reconnectMsg.className = 'max-w-2xl mx-auto bg-yellow-900/50 p-6 rounded-lg border border-yellow-700 shadow-lg';
+          reconnectMsg.innerHTML = `
+            <div class="flex items-center gap-3 mb-4">
+              <svg class="w-6 h-6 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+              </svg>
+              <h3 class="text-lg font-semibold text-yellow-100">Session Expired</h3>
+            </div>
+            <p class="text-yellow-100 mb-4">Your wallet connection has expired.</p>
+            <div class="bg-yellow-900/50 p-4 rounded-lg text-sm">
+              <p class="text-yellow-200 mb-2">Please reconnect your wallet:</p>
+              <ol class="list-decimal list-inside text-yellow-100 space-y-1">
+                <li>Use :wc command to reconnect your wallet</li>
+                <li>Try proposing the transaction again</li>
+              </ol>
+            </div>
+          `;
+          this.buffer.appendChild(reconnectMsg);
+          return;
+        }
+        
+        // Handle other errors with improved UI
+      this.buffer.innerHTML = '';
+        const errorMsg = document.createElement('div');
+        errorMsg.className = 'max-w-2xl mx-auto bg-red-900/50 p-6 rounded-lg border border-red-700 shadow-lg';
+        errorMsg.innerHTML = `
+          <div class="flex items-center gap-3 mb-4">
+            <svg class="w-6 h-6 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
+            <h3 class="text-lg font-semibold text-red-100">Transaction Failed</h3>
+          </div>
+          <p class="text-red-100 mb-4">An error occurred while processing your transaction:</p>
+          <div class="bg-red-900/50 p-4 rounded-lg">
+            <p class="text-red-200 font-mono text-sm break-all">${error?.message || 'Unknown error'}</p>
+          </div>
+          <div class="mt-4 text-sm text-red-200">
+            Please verify your wallet connection and try again.
+          </div>
+        `;
+        this.buffer.appendChild(errorMsg);
+        return;
       }
 
       // Show success message
