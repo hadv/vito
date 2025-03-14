@@ -98,6 +98,34 @@ class VimApp {
     this.safeAddressInput = document.getElementById('safe-address-input') as HTMLInputElement;
     this.networkSelect = document.getElementById('network-select') as HTMLSelectElement;
     
+    // Add paste event handler and click-to-edit functionality for Safe address input
+    if (this.safeAddressInput) {
+      // Handle paste event
+      this.safeAddressInput.addEventListener('paste', () => {
+        setTimeout(() => {
+          if (this.safeAddressInput) {
+            this.safeAddressInput.disabled = false;
+            this.commandInput.focus();
+          }
+        }, 100);
+      });
+
+      // Handle click to edit
+      this.safeAddressInput.addEventListener('click', function() {
+        if (this.disabled) {
+          this.disabled = false;
+          this.focus();
+        }
+      });
+
+      // Handle focus to enable editing
+      this.safeAddressInput.addEventListener('focus', function() {
+        if (this.disabled) {
+          this.disabled = false;
+        }
+      });
+    }
+
     // Ensure default network is selected
     if (this.networkSelect) {
       this.networkSelect.value = DEFAULT_NETWORK;
@@ -160,7 +188,7 @@ class VimApp {
     // Create new input container with network selection and Safe address input
     const newContainer = document.createElement('div');
     newContainer.id = 'input-container';
-    newContainer.className = 'w-full sm:w-1/2 p-4';
+    newContainer.className = 'w-full sm:w-2/3 p-4';
     newContainer.innerHTML = `
       <div class="space-y-4 sm:space-y-0">
         <div class="relative flex flex-col sm:flex-row sm:items-center sm:gap-4">
@@ -171,7 +199,7 @@ class VimApp {
             <input 
               type="text" 
               id="safe-address-input" 
-              class="block pl-14 pr-2.5 py-4 w-full text-white bg-[#2c2c2c] rounded-lg border border-gray-700 appearance-none focus:outline-none focus:ring-0 focus:border-blue-600 peer" 
+              class="block pl-14 pr-2.5 py-4 w-full text-white bg-[#2c2c2c] rounded-lg border border-gray-700 appearance-none focus:outline-none focus:ring-0 focus:border-blue-600 peer cursor-pointer" 
               placeholder=" "
             />
             <label 
@@ -182,7 +210,7 @@ class VimApp {
             </label>
           </div>
           <div class="flex-shrink-0 relative mt-4 sm:mt-0">
-            <select id="network-select" class="block w-full sm:w-36 h-[58px] px-3 text-white bg-[#2c2c2c] border border-gray-700 rounded-lg focus:outline-none focus:ring-0 focus:border-blue-600 appearance-none cursor-pointer">
+            <select id="network-select" class="block w-full sm:w-48 h-[58px] px-3 text-white bg-[#2c2c2c] border border-gray-700 rounded-lg focus:outline-none focus:ring-0 focus:border-blue-600 appearance-none cursor-pointer">
               ${Object.entries(NETWORKS).map(([key, network]) => 
                 `<option value="${key}" ${key === DEFAULT_NETWORK ? 'selected' : ''}>${network.displayName}</option>`
               ).join('')}
@@ -206,17 +234,45 @@ class VimApp {
     this.safeAddressInput = document.getElementById('safe-address-input') as HTMLInputElement;
     this.networkSelect = document.getElementById('network-select') as HTMLSelectElement;
 
+    // Add paste event handler and click-to-edit functionality for Safe address input
+    if (this.safeAddressInput) {
+      // Handle paste event
+      this.safeAddressInput.addEventListener('paste', () => {
+        setTimeout(() => {
+          if (this.safeAddressInput) {
+            this.safeAddressInput.disabled = false;
+            this.commandInput.focus();
+          }
+        }, 100);
+      });
+
+      // Handle click to edit
+      this.safeAddressInput.addEventListener('click', function() {
+        if (this.disabled) {
+          this.disabled = false;
+          this.focus();
+        }
+      });
+
+      // Handle focus to enable editing
+      this.safeAddressInput.addEventListener('focus', function() {
+        if (this.disabled) {
+          this.disabled = false;
+        }
+      });
+    }
+
     // Make sure help container is visible and properly styled
     const helpContainer = document.getElementById('help-container') as HTMLDivElement;
-    helpContainer.className = 'w-full sm:w-1/2 p-4';
+    helpContainer.className = 'w-full sm:w-1/3 p-4';
     helpContainer.classList.remove('hidden');
 
     // Update main content layout for mobile responsiveness
     mainContentDiv.className = 'flex flex-col sm:flex-row w-full';
 
     // Ensure command input is focused
-        setTimeout(() => {
-          this.commandInput.focus();
+    setTimeout(() => {
+      this.commandInput.focus();
     }, 100);
   }
 
@@ -1077,36 +1133,6 @@ class VimApp {
     }, 100);
   }
 
-  private async calculateSafeTxHash(
-    to: string,
-    value: string,
-    data: string,
-    operation: number,
-    nonce: string,
-    chainId: number,
-    safeAddress: string
-  ): Promise<string> {
-    // Ensure data is properly formatted
-    const formattedData = data ? (data.startsWith('0x') ? data : `0x${data}`) : '0x';
-    
-    // Ensure value is properly formatted
-    const formattedValue = value ? 
-      (value.startsWith('0x') ? value : ethers.parseEther(value).toString()) : 
-      '0x0';
-
-    return calculateSafeTxHash(
-      {
-        to,
-        value: formattedValue,
-        data: formattedData,
-        operation,
-        nonce
-      },
-      safeAddress,
-      chainId
-    );
-  }
-
   private async getSafeNonce(safeAddress: string): Promise<string> {
     // Safe contract ABI for nonce function
     const safeAbi = [
@@ -1123,6 +1149,43 @@ class VimApp {
     } catch (error) {
       console.error('Error getting Safe nonce:', error);
       throw new Error('Failed to get Safe nonce');
+    }
+  }
+
+  private async getSafeTxHashFromContract(
+    to: string,
+    value: string,
+    data: string,
+    operation: number,
+    nonce: string,
+    safeAddress: string
+  ): Promise<string> {
+    // Safe contract ABI for getTransactionHash function
+    const safeAbi = [
+      "function getTransactionHash(address to, uint256 value, bytes data, uint8 operation, uint256 safeTxGas, uint256 baseGas, uint256 gasPrice, address gasToken, address refundReceiver, uint256 nonce) view returns (bytes32)"
+    ];
+    
+    // Create contract instance
+    const safeContract = new ethers.Contract(safeAddress, safeAbi, this.provider);
+    
+    try {
+      // Get hash from contract
+      const hash = await safeContract.getTransactionHash(
+        to,
+        value,
+        data,
+        operation,
+        '0', // safeTxGas
+        '0', // baseGas
+        '0', // gasPrice
+        '0x0000000000000000000000000000000000000000', // gasToken
+        '0x0000000000000000000000000000000000000000', // refundReceiver
+        nonce
+      );
+      return hash;
+    } catch (error) {
+      console.error('Error getting Safe transaction hash:', error);
+      throw new Error('Failed to get Safe transaction hash');
     }
   }
 
@@ -1196,18 +1259,150 @@ class VimApp {
       // Ensure data is hex
       const dataHex = localTxData.data.startsWith('0x') ? localTxData.data : `0x${localTxData.data}`;
 
-      // Calculate Safe tx hash
-      const safeTxHash = await this.calculateSafeTxHash(
+      // Get hash from Safe contract
+      const safeTxHash = await this.getSafeTxHashFromContract(
         localTxData.to,
         valueHex,
         dataHex,
         0,
         nonce,
-        this.selectedNetwork.chainId,
         this.safeAddress
       );
 
-      // Encode function data
+      // Show preview before sending
+      this.buffer.innerHTML = '';
+      const previewMsg = document.createElement('div');
+      previewMsg.className = 'max-w-2xl mx-auto space-y-4';
+
+      // Transaction Details Section
+      const txDetailsSection = document.createElement('div');
+      txDetailsSection.className = 'bg-gray-800 p-6 rounded-lg border border-gray-700 shadow-lg';
+      txDetailsSection.innerHTML = `
+        <h3 class="text-xl font-bold text-white mb-4">Transaction Preview</h3>
+        <div class="space-y-4">
+          <div class="bg-gray-900 p-4 rounded-lg">
+            <h4 class="text-sm font-medium text-gray-400 mb-2">Contract Details</h4>
+            <div class="space-y-2 font-mono text-sm">
+              <p class="flex justify-between">
+                <span class="text-gray-500">Contract:</span>
+                <span class="text-gray-300">${contractAddresses.safeTxPool}</span>
+              </p>
+              <p class="flex justify-between">
+                <span class="text-gray-500">Function:</span>
+                <span class="text-gray-300">proposeTx</span>
+              </p>
+            </div>
+          </div>
+
+          <div class="bg-gray-900 p-4 rounded-lg">
+            <h4 class="text-sm font-medium text-gray-400 mb-2">Transaction Parameters</h4>
+            <div class="space-y-2 font-mono text-sm">
+              <p class="flex justify-between">
+                <span class="text-gray-500">Safe:</span>
+                <span class="text-gray-300">${this.safeAddress}</span>
+              </p>
+              <p class="flex justify-between">
+                <span class="text-gray-500">Target:</span>
+                <span class="text-gray-300">${localTxData.to}</span>
+              </p>
+              <p class="flex justify-between">
+                <span class="text-gray-500">Value:</span>
+                <span class="text-gray-300">${ethers.formatEther(valueHex)} ETH</span>
+              </p>
+              <p class="flex justify-between">
+                <span class="text-gray-500">Operation:</span>
+                <span class="text-gray-300">0 (Call)</span>
+              </p>
+              <p class="flex justify-between">
+                <span class="text-gray-500">Nonce:</span>
+                <span class="text-gray-300">${nonce}</span>
+              </p>
+            </div>
+          </div>
+
+          <div class="bg-gray-900 p-4 rounded-lg">
+            <h4 class="text-sm font-medium text-gray-400 mb-2">Transaction Data</h4>
+            <div class="font-mono text-sm break-all text-gray-300">
+              ${dataHex}
+            </div>
+          </div>
+        </div>
+      `;
+
+      // Hash Verification Section
+      const hashSection = document.createElement('div');
+      hashSection.className = 'bg-gray-800 p-6 rounded-lg border border-gray-700 shadow-lg';
+      
+      // Calculate our hash for comparison
+      const calculatedHash = await calculateSafeTxHash(
+        {
+          to: localTxData.to,
+          value: valueHex,
+          data: dataHex,
+          operation: 0,
+          nonce
+        },
+        this.safeAddress,
+        this.selectedNetwork.chainId
+      );
+
+      const hashVerification = safeTxHash === calculatedHash;
+      
+      hashSection.innerHTML = `
+        <h3 class="text-xl font-bold text-white mb-4">Hash Verification</h3>
+        <div class="space-y-4">
+          <div class="bg-gray-900 p-4 rounded-lg">
+            <h4 class="text-sm font-medium text-gray-400 mb-2">Safe Contract Hash</h4>
+            <div class="font-mono text-sm break-all text-gray-300">
+              ${safeTxHash}
+            </div>
+          </div>
+
+          <div class="bg-gray-900 p-4 rounded-lg">
+            <h4 class="text-sm font-medium text-gray-400 mb-2">Calculated Hash</h4>
+            <div class="font-mono text-sm break-all text-gray-300">
+              ${calculatedHash}
+            </div>
+          </div>
+
+          <div class="bg-gray-900 p-4 rounded-lg">
+            <h4 class="text-sm font-medium text-gray-400 mb-2">Hash Verification</h4>
+            <div class="flex items-center gap-2">
+              <span class="${hashVerification ? 'text-green-400' : 'text-red-400'} font-medium">
+                ${hashVerification ? '✓ Verified' : '✗ Invalid'}
+              </span>
+              <span class="text-gray-400 text-sm">
+                ${hashVerification ? 
+                  'Safe transaction hash matches the calculated hash' : 
+                  'Warning: Safe transaction hash does not match the calculated hash'}
+              </span>
+            </div>
+          </div>
+        </div>
+      `;
+
+      previewMsg.appendChild(txDetailsSection);
+      previewMsg.appendChild(hashSection);
+      this.buffer.appendChild(previewMsg);
+
+      // If hash verification fails, show warning and return
+      if (!hashVerification) {
+        const warningMsg = document.createElement('div');
+        warningMsg.className = 'max-w-2xl mx-auto mt-4 bg-red-900/50 p-4 rounded-lg text-red-200';
+        warningMsg.innerHTML = `
+          <div class="flex items-center gap-2">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+            </svg>
+            <span class="font-medium">Transaction cannot proceed due to hash mismatch</span>
+          </div>
+          <p class="mt-2 text-sm">Please verify the transaction parameters and try again.</p>
+        `;
+        this.buffer.appendChild(warningMsg);
+        return;
+      }
+
+      // Encode function data for the transaction
       const iface = new ethers.Interface([
         "function proposeTx(bytes32 safeTxHash, address safe, address to, uint256 value, bytes data, uint8 operation, uint256 nonce) external returns (bool)"
       ]);
@@ -1221,29 +1416,6 @@ class VimApp {
         0,
         BigInt(nonce)
       ]);
-
-      // Show preview before sending
-      this.buffer.innerHTML = '';
-      const previewMsg = document.createElement('div');
-      previewMsg.className = 'bg-gray-800 p-4 rounded-lg text-white mb-4';
-      previewMsg.innerHTML = `
-        <h3 class="text-xl font-bold mb-2">Transaction Preview</h3>
-        <div class="space-y-2 font-mono text-sm">
-          <p>Contract: ${contractAddresses.safeTxPool}</p>
-          <p>Function: proposeTx</p>
-          <p class="mt-2">Parameters:</p>
-          <ul class="pl-4">
-            <li>Safe Tx Hash: ${safeTxHash}</li>
-            <li>Safe: ${this.safeAddress}</li>
-            <li>Target: ${localTxData.to}</li>
-            <li>Value: ${ethers.formatEther(valueHex)} ETH</li>
-            <li>Data: ${dataHex}</li>
-            <li>Operation: 0 (Call)</li>
-            <li>Nonce: ${nonce}</li>
-          </ul>
-        </div>
-      `;
-      this.buffer.appendChild(previewMsg);
 
       // Create a unique request ID
       const requestId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -1497,16 +1669,74 @@ class VimApp {
       // Show QR code
     this.buffer.innerHTML = '';
     const qrContainer = document.createElement('div');
-      qrContainer.className = 'flex flex-col items-center justify-center space-y-4 p-8';
+      qrContainer.className = 'max-w-2xl mx-auto bg-gray-800 p-6 rounded-lg border border-gray-700 shadow-lg';
       
-      const qrTitle = document.createElement('h3');
-      qrTitle.className = 'text-xl font-bold text-white';
-      qrTitle.textContent = 'Scan QR Code with WalletConnect';
-      qrContainer.appendChild(qrTitle);
+      // Create title section
+      const titleSection = document.createElement('div');
+      titleSection.className = 'text-center mb-6';
+      
+      const title = document.createElement('h3');
+      title.className = 'text-xl font-bold text-white mb-2';
+      title.textContent = 'Connect Your Wallet';
+      
+      const subtitle = document.createElement('p');
+      subtitle.className = 'text-gray-400 text-sm';
+      subtitle.textContent = 'Scan the QR code with your WalletConnect-enabled wallet';
+      
+      titleSection.appendChild(title);
+      titleSection.appendChild(subtitle);
+      qrContainer.appendChild(titleSection);
+      
+      // Create QR code section
+      const qrSection = document.createElement('div');
+      qrSection.className = 'flex flex-col items-center justify-center bg-gray-900 p-8 rounded-lg mb-6';
       
       const qrCanvas = document.createElement('canvas');
-      qrCanvas.className = 'bg-white p-4 rounded-lg';
-      qrContainer.appendChild(qrCanvas);
+      qrCanvas.className = 'bg-white p-4 rounded-lg shadow-lg';
+      qrSection.appendChild(qrCanvas);
+      qrContainer.appendChild(qrSection);
+
+      // Add copy link section
+      const copySection = document.createElement('div');
+      copySection.className = 'bg-gray-900 p-4 rounded-lg';
+      
+      const copyLabel = document.createElement('p');
+      copyLabel.className = 'text-sm font-medium text-gray-400 mb-3';
+      copyLabel.textContent = 'Or copy connection link';
+      copySection.appendChild(copyLabel);
+      
+      const copyContainer = document.createElement('div');
+      copyContainer.className = 'flex items-center gap-2';
+      
+      const copyInput = document.createElement('input');
+      copyInput.type = 'text';
+      copyInput.value = connectResult.uri;
+      copyInput.readOnly = true;
+      copyInput.className = 'flex-1 bg-gray-700 text-white px-3 py-2 rounded-lg text-sm font-mono border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer';
+      
+      const copyButton = document.createElement('button');
+      copyButton.className = 'bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors duration-200 flex-shrink-0 focus:outline-none focus:ring-2 focus:ring-blue-500';
+      copyButton.textContent = 'Copy';
+      
+      // Add copy functionality
+      copyButton.onclick = async () => {
+        try {
+          await navigator.clipboard.writeText(connectResult.uri);
+          copyButton.textContent = 'Copied!';
+          copyButton.className = 'bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors duration-200 flex-shrink-0 focus:outline-none focus:ring-2 focus:ring-green-500';
+          setTimeout(() => {
+            copyButton.textContent = 'Copy';
+            copyButton.className = 'bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors duration-200 flex-shrink-0 focus:outline-none focus:ring-2 focus:ring-blue-500';
+          }, 2000);
+        } catch (err) {
+          console.error('Failed to copy:', err);
+        }
+      };
+      
+      copyContainer.appendChild(copyInput);
+      copyContainer.appendChild(copyButton);
+      copySection.appendChild(copyContainer);
+      qrContainer.appendChild(copySection);
       
     this.buffer.appendChild(qrContainer);
 

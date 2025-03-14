@@ -50,10 +50,8 @@ export interface SafeTransaction {
 export class SafeTxPool {
   private contract: SafeTxPoolContract;
   private provider: ethers.JsonRpcProvider;
-  private network: NetworkConfig;
 
   constructor(address: string, network: NetworkConfig) {
-    this.network = network;
     this.provider = new ethers.JsonRpcProvider(network.provider);
     this.contract = new ethers.Contract(address, SAFE_TX_POOL_ABI, this.provider) as SafeTxPoolContract;
   }
@@ -197,53 +195,5 @@ export class SafeTxPool {
   async deleteTransaction(txHash: string, signer: ethers.Signer): Promise<void> {
     const contractWithSigner = this.contract.connect(signer) as SafeTxPoolContract;
     await contractWithSigner.deleteTx(txHash);
-  }
-
-  // Helper function to calculate Safe transaction hash
-  async calculateSafeTxHash(
-    to: string,
-    value: string,
-    data: string,
-    operation: number,
-    nonce: string,
-    chainId: number,
-    safeAddress: string
-  ): Promise<string> {
-    const domain = {
-      name: 'Safe Transaction',
-      version: '1.0',
-      chainId,
-      verifyingContract: safeAddress
-    };
-
-    const types = {
-      SafeTx: [
-        { name: 'to', type: 'address' },
-        { name: 'value', type: 'uint256' },
-        { name: 'data', type: 'bytes' },
-        { name: 'operation', type: 'uint8' },
-        { name: 'safeTxGas', type: 'uint256' },
-        { name: 'baseGas', type: 'uint256' },
-        { name: 'gasPrice', type: 'uint256' },
-        { name: 'gasToken', type: 'address' },
-        { name: 'refundReceiver', type: 'address' },
-        { name: 'nonce', type: 'uint256' }
-      ]
-    };
-
-    const message = {
-      to,
-      value,
-      data,
-      operation,
-      safeTxGas: '0',
-      baseGas: '0',
-      gasPrice: '0',
-      gasToken: ethers.ZeroAddress,
-      refundReceiver: ethers.ZeroAddress,
-      nonce
-    };
-
-    return ethers.TypedDataEncoder.hash(domain, types, message);
   }
 } 
