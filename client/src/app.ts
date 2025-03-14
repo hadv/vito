@@ -41,6 +41,7 @@ class VimApp {
     data: string;
   } | null = null;
   private _isProposing: boolean = false;
+  private selectedTxHash: string | null = null; // Add this property to store selected transaction hash
 
   constructor() {
     this.buffer = document.getElementById('buffer') as HTMLDivElement;
@@ -907,10 +908,19 @@ class VimApp {
             </div>
           `;
           
-          // Add click handler for toggle functionality
+          // Add click handler for selection
           row.addEventListener('click', (e) => {
             e.stopPropagation();
-            showTxDetails(txHash);
+            const clickedIndex = parseInt(row.getAttribute('data-index') || '0');
+            currentFocusIndex = clickedIndex;
+            // Remove selection from all rows
+            document.querySelectorAll('#tx-table > div:not(:first-child)').forEach(r => {
+              r.classList.remove('bg-gray-700', 'selected-tx');
+            });
+            // Add selection to clicked row
+            row.classList.add('bg-gray-700', 'selected-tx');
+            // Store the selected transaction hash
+            this.selectedTxHash = row.getAttribute('data-tx-hash') || null;
           });
 
           table.appendChild(row);
@@ -928,8 +938,73 @@ class VimApp {
         this.buffer.innerHTML = '';
         this.buffer.appendChild(container);
 
-        // Focus the container
-        container.focus();
+        // Function to update focus and selection
+        const updateFocus = (index: number) => {
+          const rows = document.querySelectorAll('#tx-table > div:not(:first-child)');
+          rows.forEach((row, i) => {
+            if (i === index) {
+              row.classList.add('bg-gray-700', 'selected-tx');
+              row.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+              // Store the selected transaction hash
+              this.selectedTxHash = row.getAttribute('data-tx-hash') || null;
+            } else {
+              row.classList.remove('bg-gray-700', 'selected-tx');
+            }
+          });
+          currentFocusIndex = index;
+        };
+
+        // Add keyboard navigation
+        container.addEventListener('keydown', (e: KeyboardEvent) => {
+          const totalTx = pendingTxHashes.length;
+          
+          switch (e.key) {
+            case 'ArrowUp':
+              e.preventDefault();
+              if (currentFocusIndex > 0) {
+                updateFocus(currentFocusIndex - 1);
+              }
+              break;
+              
+            case 'ArrowDown':
+              e.preventDefault();
+              if (currentFocusIndex < totalTx - 1) {
+                updateFocus(currentFocusIndex + 1);
+              }
+              break;
+              
+            case 'Enter':
+              e.preventDefault();
+              const selectedTxHash = pendingTxHashes[currentFocusIndex];
+              if (selectedTxHash) {
+                // Keep the selection when showing details
+                const selectedRow = document.querySelector(`[data-tx-hash="${selectedTxHash}"]`);
+                if (selectedRow) {
+                  // Ensure the row stays selected
+                  document.querySelectorAll('#tx-table > div:not(:first-child)').forEach(row => {
+                    row.classList.remove('bg-gray-700', 'selected-tx');
+                  });
+                  selectedRow.classList.add('bg-gray-700', 'selected-tx');
+                }
+                showTxDetails(selectedTxHash);
+              }
+              break;
+              
+            case 'Escape':
+              e.preventDefault();
+              const existingDetails = document.querySelector('.tx-details');
+              if (existingDetails) {
+                existingDetails.remove();
+              }
+              break;
+          }
+        });
+
+        // Set initial focus and selection
+        setTimeout(() => {
+          container.focus();
+          updateFocus(0);
+        }, 0);
 
         // Function to show transaction details
         const showTxDetails = (txHash: string) => {
@@ -952,6 +1027,12 @@ class VimApp {
           const row = document.querySelector(`[data-tx-hash="${txHash}"]`);
           
           if (row && txDetails) {
+            // Ensure the row stays selected when showing details
+            document.querySelectorAll('#tx-table > div:not(:first-child)').forEach(r => {
+              r.classList.remove('bg-gray-700', 'selected-tx');
+            });
+            row.classList.add('bg-gray-700', 'selected-tx');
+            
             const detailsRow = document.createElement('div');
             detailsRow.className = 'px-4 py-3 bg-gray-900/50 tx-details';
             detailsRow.innerHTML = `
@@ -986,59 +1067,6 @@ class VimApp {
             row.parentNode?.insertBefore(detailsRow, row.nextElementSibling);
           }
         };
-
-        // Function to update focus
-        const updateFocus = (index: number) => {
-          // Remove focus from all rows
-          document.querySelectorAll('#tx-table > div:not(:first-child)').forEach(row => {
-            row.classList.remove('bg-gray-700');
-          });
-          
-          // Add focus to current row
-          const currentRow = document.querySelector(`[data-index="${index}"]`);
-          if (currentRow) {
-            currentRow.classList.add('bg-gray-700');
-            currentRow.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-          }
-        };
-
-        // Add keyboard navigation
-        container.addEventListener('keydown', (e: KeyboardEvent) => {
-          const totalTx = pendingTxHashes.length;
-          
-          switch (e.key) {
-            case 'ArrowUp':
-              e.preventDefault();
-              currentFocusIndex = Math.max(0, currentFocusIndex - 1);
-              updateFocus(currentFocusIndex);
-              break;
-              
-            case 'ArrowDown':
-              e.preventDefault();
-              currentFocusIndex = Math.min(totalTx - 1, currentFocusIndex + 1);
-              updateFocus(currentFocusIndex);
-              break;
-              
-            case 'Enter':
-              e.preventDefault();
-              const selectedTxHash = pendingTxHashes[currentFocusIndex];
-              if (selectedTxHash) {
-                showTxDetails(selectedTxHash);
-              }
-              break;
-              
-            case 'Escape':
-              e.preventDefault();
-              const existingDetails = document.querySelector('.tx-details');
-              if (existingDetails) {
-                existingDetails.remove();
-              }
-              break;
-          }
-        });
-
-        // Set initial focus
-        updateFocus(0);
 
       } catch (error) {
         console.error('Failed to fetch pending transactions:', error);
@@ -1109,10 +1137,336 @@ class VimApp {
         this.buffer.className = 'flex-1 p-4 overflow-y-auto text-yellow-400';
         return;
       }
-      // We need a safeTxHash parameter here
-      this.buffer.textContent = 'Please provide a transaction hash to sign';
-      this.buffer.className = 'flex-1 p-4 overflow-y-auto text-yellow-400';
-      return;
+
+      // Use the stored transaction hash instead of looking for selected element
+      if (!this.selectedTxHash) {
+        this.buffer.textContent = 'Please select a transaction to sign using ↑/↓ keys';
+        this.buffer.className = 'flex-1 p-4 overflow-y-auto text-yellow-400';
+        return;
+      }
+
+      try {
+        // Get contract address for the current network
+        const contractAddresses = getContractAddress(this.selectedNetwork);
+        
+        // First convert the hash to proper hex if it isn't already
+        const hashHex = this.selectedTxHash.startsWith('0x') ? this.selectedTxHash : `0x${this.selectedTxHash}`;
+        
+        // Then ensure it's padded to 32 bytes
+        const formattedHash = ethers.zeroPadValue(hashHex, 32);
+
+        // Get transaction details from the selected transaction
+        const safeTxPool = new SafeTxPool(contractAddresses.safeTxPool, this.selectedNetwork);
+        const txDetails = await safeTxPool.getTransactionDetails(this.selectedTxHash);
+
+        // Prepare transaction data for signing
+        const localTxData = {
+          to: txDetails.to,
+          value: txDetails.value,
+          data: txDetails.data
+        };
+
+        // Convert value to hex if needed
+        const valueHex = localTxData.value.startsWith('0x') ? localTxData.value : `0x${BigInt(localTxData.value).toString(16)}`;
+        
+        // Ensure data is hex
+        const dataHex = localTxData.data.startsWith('0x') ? localTxData.data : `0x${localTxData.data}`;
+
+        // Get nonce from Safe contract
+        const nonce = await this.getSafeNonce(this.safeAddress);
+
+        // Step 1: Request signature from user
+        const signRequest = {
+          topic: this.sessionTopic,
+          chainId: `eip155:${this.selectedNetwork.chainId}`,
+          request: {
+            id: Math.floor(Math.random() * 1000000),
+            jsonrpc: '2.0',
+            method: 'eth_signTypedData_v4',
+            params: [
+              this.signerAddress,
+              JSON.stringify({
+                domain: {
+                  name: 'Safe Transaction',
+                  version: '1.0',
+                  chainId: this.selectedNetwork.chainId,
+                  verifyingContract: this.safeAddress
+                },
+                primaryType: 'SafeTransaction',
+                types: {
+                  EIP712Domain: [
+                    { name: 'name', type: 'string' },
+                    { name: 'version', type: 'string' },
+                    { name: 'chainId', type: 'uint256' },
+                    { name: 'verifyingContract', type: 'address' }
+                  ],
+                  SafeTransaction: [
+                    { name: 'to', type: 'address' },
+                    { name: 'value', type: 'uint256' },
+                    { name: 'data', type: 'bytes' },
+                    { name: 'operation', type: 'uint8' },
+                    { name: 'safeTxGas', type: 'uint256' },
+                    { name: 'baseGas', type: 'uint256' },
+                    { name: 'gasPrice', type: 'uint256' },
+                    { name: 'gasToken', type: 'address' },
+                    { name: 'refundReceiver', type: 'address' },
+                    { name: 'nonce', type: 'uint256' },
+                    { name: 'safeTxHash', type: 'bytes32' }
+                  ]
+                },
+                message: {
+                  to: localTxData.to,
+                  value: valueHex,
+                  data: dataHex,
+                  operation: '0',
+                  safeTxGas: '0',
+                  baseGas: '0',
+                  gasPrice: '0',
+                  gasToken: '0x0000000000000000000000000000000000000000',
+                  refundReceiver: '0x0000000000000000000000000000000000000000',
+                  nonce: nonce.toString(),
+                  safeTxHash: formattedHash
+                }
+              })
+            ]
+          }
+        };
+
+        // Show signing confirmation UI for the first step
+        this.buffer.innerHTML = '';
+        const confirmationMsg = document.createElement('div');
+        confirmationMsg.className = 'max-w-2xl mx-auto bg-blue-900/50 p-6 rounded-lg border border-blue-700 shadow-lg';
+        confirmationMsg.innerHTML = `
+          <div class="flex items-center gap-3 mb-4">
+            <svg class="w-6 h-6 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
+            <h3 class="text-lg font-semibold text-blue-100">Step 1: Sign the Safe Transaction</h3>
+          </div>
+          <div class="bg-blue-900/50 p-4 rounded-lg space-y-3">
+            <p class="text-blue-200 text-sm">Please review and sign the Safe transaction details in your wallet:</p>
+            <div class="space-y-2 font-mono text-sm">
+              <p class="flex justify-between">
+                <span class="text-blue-400">To:</span>
+                <span class="text-blue-200">${truncateAddress(localTxData.to)}</span>
+              </p>
+              <p class="flex justify-between">
+                <span class="text-blue-400">Value:</span>
+                <span class="text-blue-200">${ethers.formatEther(valueHex)} ETH</span>
+              </p>
+              <p class="flex justify-between">
+                <span class="text-blue-400">Data:</span>
+                <span class="text-blue-200">${dataHex === '0x' ? 'None' : truncateAddress(dataHex)}</span>
+              </p>
+              <p class="flex justify-between">
+                <span class="text-blue-400">Operation:</span>
+                <span class="text-blue-200">Call (0)</span>
+              </p>
+              <p class="flex justify-between">
+                <span class="text-blue-400">Nonce:</span>
+                <span class="text-blue-200">${nonce}</span>
+              </p>
+              <p class="flex justify-between">
+                <span class="text-blue-400">Safe Tx Hash:</span>
+                <span class="text-blue-200">${truncateAddress(this.selectedTxHash)}</span>
+              </p>
+              <p class="flex justify-between">
+                <span class="text-blue-400">Network:</span>
+                <span class="text-blue-200">${this.selectedNetwork.displayName}</span>
+              </p>
+            </div>
+          </div>
+        `;
+        this.buffer.appendChild(confirmationMsg);
+
+        // Request signature from user
+        console.log('Requesting signature for hash:', formattedHash);
+        const signature = await this.signClient.request(signRequest);
+        console.log('Received signature:', signature);
+
+        // Step 2: Call signTx with the received signature
+        // Create interface with the correct function signature
+        const iface = new ethers.Interface([
+          "function signTx(bytes32 txHash, bytes calldata signature) external",
+        ]);
+
+        // Encode the function call with both parameters
+        const encodedTxData = iface.encodeFunctionData("signTx", [formattedHash, signature]);
+
+        // Get current gas prices
+        const feeData = await this.provider.getFeeData();
+        console.log('Current fee data:', feeData);
+
+        // Create a unique request ID
+        const requestId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+        // Prepare the transaction request with all necessary parameters
+        const request = {
+          topic: this.sessionTopic,
+          chainId: `eip155:${this.selectedNetwork.chainId}`,
+          request: {
+            id: requestId,
+            jsonrpc: '2.0',
+            method: 'eth_sendTransaction',
+            params: [{
+              from: this.signerAddress,
+              to: contractAddresses.safeTxPool,
+              data: encodedTxData,
+              value: "0x0",
+              // Add gas parameters
+              gasLimit: "0x55730",  // Appropriate gas limit for contract interaction
+              maxFeePerGas: feeData.maxFeePerGas ? `0x${feeData.maxFeePerGas.toString(16)}` : "0x2540be400",  // 10 Gwei
+              maxPriorityFeePerGas: feeData.maxPriorityFeePerGas ? `0x${feeData.maxPriorityFeePerGas.toString(16)}` : "0x3b9aca00",  // 1 Gwei
+              type: "0x2"  // EIP-1559 transaction type
+            }]
+          }
+        };
+
+        // Show signing confirmation UI for the second step
+        this.buffer.innerHTML = '';
+        const step2Msg = document.createElement('div');
+        step2Msg.className = 'max-w-2xl mx-auto bg-blue-900/50 p-6 rounded-lg border border-blue-700 shadow-lg';
+        step2Msg.innerHTML = `
+          <div class="flex items-center gap-3 mb-4">
+            <svg class="w-6 h-6 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
+            <h3 class="text-lg font-semibold text-blue-100">Step 2: Submit Signature to Contract</h3>
+          </div>
+          <div class="bg-blue-900/50 p-4 rounded-lg space-y-3">
+            <p class="text-blue-200 text-sm">Please confirm the transaction to submit your signature:</p>
+            <div class="space-y-2 font-mono text-sm">
+              <p class="flex justify-between">
+                <span class="text-blue-400">Function:</span>
+                <span class="text-blue-200">signTx(bytes32, bytes)</span>
+              </p>
+              <p class="flex justify-between">
+                <span class="text-blue-400">Contract:</span>
+                <span class="text-blue-200">${truncateAddress(contractAddresses.safeTxPool)}</span>
+              </p>
+              <p class="flex justify-between">
+                <span class="text-blue-400">Transaction Hash:</span>
+                <span class="text-blue-200">${truncateAddress(this.selectedTxHash)}</span>
+              </p>
+              <p class="flex justify-between">
+                <span class="text-blue-400">Network:</span>
+                <span class="text-blue-200">${this.selectedNetwork.displayName}</span>
+              </p>
+              <p class="flex justify-between">
+                <span class="text-blue-400">Gas Limit:</span>
+                <span class="text-blue-200">0x55730</span>
+              </p>
+              <p class="flex justify-between">
+                <span class="text-blue-400">Max Fee:</span>
+                <span class="text-blue-200">${feeData.maxFeePerGas ? ethers.formatUnits(feeData.maxFeePerGas, 'gwei') : '10'} Gwei</span>
+              </p>
+              <p class="flex justify-between">
+                <span class="text-blue-400">Priority Fee:</span>
+                <span class="text-blue-200">${feeData.maxPriorityFeePerGas ? ethers.formatUnits(feeData.maxPriorityFeePerGas, 'gwei') : '1'} Gwei</span>
+              </p>
+            </div>
+          </div>
+        `;
+        this.buffer.appendChild(step2Msg);
+
+        // Send the transaction
+        console.log('Sending transaction request:', request);
+        const txHash = await this.signClient.request(request);
+
+        // Show success message
+        this.buffer.innerHTML = '';
+        const successMsg = document.createElement('div');
+        successMsg.className = 'max-w-2xl mx-auto bg-green-900/50 p-6 rounded-lg border border-green-700 shadow-lg';
+        successMsg.innerHTML = `
+          <div class="flex items-center gap-3 mb-4">
+            <svg class="w-6 h-6 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+            </svg>
+            <h3 class="text-lg font-semibold text-green-100">Transaction Signed Successfully</h3>
+          </div>
+          <div class="bg-green-900/50 p-4 rounded-lg space-y-3">
+            <div class="font-mono text-sm">
+              <p class="text-green-400 mb-1">Transaction Hash:</p>
+              <p class="text-green-200 break-all">${txHash}</p>
+            </div>
+            <p class="text-green-200 text-sm mt-4">The transaction has been signed. Use :l to refresh the transaction list.</p>
+          </div>
+        `;
+        this.buffer.appendChild(successMsg);
+
+      } catch (error: unknown) {
+        console.error('Failed to sign transaction:', error);
+        
+        // Handle user rejection
+        if (error instanceof Error && 
+            (error.message.toLowerCase().includes('rejected') || 
+             error.message.toLowerCase().includes('user denied'))) {
+          this.buffer.innerHTML = '';
+          const rejectionMsg = document.createElement('div');
+          rejectionMsg.className = 'max-w-2xl mx-auto bg-yellow-900/50 p-6 rounded-lg border border-yellow-700 shadow-lg';
+          rejectionMsg.innerHTML = `
+            <div class="flex items-center gap-3 mb-4">
+              <svg class="w-6 h-6 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+              </svg>
+              <h3 class="text-lg font-semibold text-yellow-100">Signature Cancelled</h3>
+            </div>
+            <p class="text-yellow-100">You've cancelled the signing request.</p>
+          `;
+          this.buffer.appendChild(rejectionMsg);
+          return;
+        }
+        
+        // Handle session errors
+        if (error instanceof Error && 
+            (error.message.includes('session topic') || 
+             error.message.includes('No matching key') ||
+             error.message.includes('expired'))) {
+          this.sessionTopic = null;
+          this.signerAddress = null;
+          this.signerAddressDisplay.textContent = '';
+          
+          this.buffer.innerHTML = '';
+          const reconnectMsg = document.createElement('div');
+          reconnectMsg.className = 'max-w-2xl mx-auto bg-yellow-900/50 p-6 rounded-lg border border-yellow-700 shadow-lg';
+          reconnectMsg.innerHTML = `
+            <div class="flex items-center gap-3 mb-4">
+              <svg class="w-6 h-6 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+              </svg>
+              <h3 class="text-lg font-semibold text-yellow-100">Session Expired</h3>
+            </div>
+            <p class="text-yellow-100 mb-4">Your wallet connection has expired.</p>
+            <div class="bg-yellow-900/50 p-4 rounded-lg text-sm">
+              <p class="text-yellow-200 mb-2">Please reconnect your wallet:</p>
+              <ol class="list-decimal list-inside text-yellow-100 space-y-1">
+                <li>Use :wc command to reconnect your wallet</li>
+                <li>Try signing the transaction again</li>
+              </ol>
+            </div>
+          `;
+          this.buffer.appendChild(reconnectMsg);
+          return;
+        }
+        
+        // Handle other errors
+        this.buffer.innerHTML = '';
+        const errorMsg = document.createElement('div');
+        errorMsg.className = 'max-w-2xl mx-auto bg-red-900/50 p-6 rounded-lg border border-red-700 shadow-lg';
+        errorMsg.innerHTML = `
+          <div class="flex items-center gap-3 mb-4">
+            <svg class="w-6 h-6 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
+            <h3 class="text-lg font-semibold text-red-100">Signing Failed</h3>
+          </div>
+          <p class="text-red-100 mb-4">An error occurred while signing the transaction:</p>
+          <div class="bg-red-900/50 p-4 rounded-lg">
+            <p class="text-red-200 font-mono text-sm break-all">${error instanceof Error ? error.message : 'Unknown error'}</p>
+          </div>
+        `;
+        this.buffer.appendChild(errorMsg);
+      }
     } else if (this.command === ':pool') {
       if (this.mode !== 'TX') {
         this.buffer.textContent = 'Please switch to TX mode first by pressing "e" key';
@@ -1623,9 +1977,11 @@ class VimApp {
             to: contractAddresses.safeTxPool,
             data: encodedTxData,
             value: "0x0",
-            gasLimit: "0x55730",
+            // Add gas parameters
+            gasLimit: "0x55730",  // Appropriate gas limit for contract interaction
             maxFeePerGas: "0x2540be400",  // 10 Gwei
-            maxPriorityFeePerGas: "0x3b9aca00"  // 1 Gwei
+            maxPriorityFeePerGas: "0x3b9aca00",  // 1 Gwei
+            type: "0x2"  // EIP-1559 transaction type
           }]
         }
       };
