@@ -5,11 +5,12 @@ import { SignClient } from '@walletconnect/sign-client';
 import { SafeInfo } from './types/SafeInfo';
 import { NetworkConfig } from './types/NetworkConfig';
 import { calculateSafeTxHash } from './utils/safeTransactions';
-import { truncateAddress } from './utils/addressUtils';
+import { truncateAddress } from './utils/address';
 import { NETWORKS, DEFAULT_NETWORK, getNetworkConfig } from './config/networks';
 import { COMMANDS } from './config/commands';
 import { getContractAddress } from './config/contracts';
 import { SafeTxPool } from './utils/safeTransactionManager';
+import { prepareTransactionRequest } from './utils/transaction';
 
 class VimApp {
   private buffer: HTMLDivElement;
@@ -243,7 +244,7 @@ class VimApp {
         setTimeout(() => {
           if (this.safeAddressInput) {
             this.safeAddressInput.disabled = false;
-          this.commandInput.focus();
+            this.commandInput.focus();
           }
         }, 100);
       });
@@ -1294,45 +1295,25 @@ class VimApp {
         const encodedTxData = iface.encodeFunctionData("signTx", [formattedHash, signature]);
 
         // Get current gas prices
-        const feeData = await this.provider.getFeeData();
-        console.log('Current fee data:', feeData);
-
-        // Create a unique request ID
-        const requestId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-
-        // First estimate the gas
-        const gasEstimate = await this.provider.estimateGas({
-          from: this.signerAddress,
-          to: contractAddresses.safeTxPool,
-          data: encodedTxData,
-          value: "0x0"
+        // Use utility function to prepare transaction request
+        const request = await prepareTransactionRequest({
+          provider: this.provider,
+          signerAddress: this.signerAddress!,
+          sessionTopic: this.sessionTopic!,
+          selectedNetwork: this.selectedNetwork,
+          contractAddress: contractAddresses.safeTxPool,
+          encodedTxData,
+          requestId: Math.floor(Math.random() * 1000000)
         });
 
-        // Add 20% buffer to the estimate for safety
-        const gasLimit = (gasEstimate * BigInt(120)) / BigInt(100);
-        console.log('Estimated gas:', gasEstimate.toString(), 'Using gas limit:', gasLimit.toString());
-
-        // Prepare the transaction request with all necessary parameters
-        const request = {
-          topic: this.sessionTopic,
-          chainId: `eip155:${this.selectedNetwork.chainId}`,
-          request: {
-            id: requestId,
-            jsonrpc: '2.0',
-            method: 'eth_sendTransaction',
-            params: [{
-              from: this.signerAddress,
-              to: contractAddresses.safeTxPool,
-              data: encodedTxData,
-              value: "0x0",
-              // Use estimated gas limit
-              gasLimit: `0x${gasLimit.toString(16)}`,
-              maxFeePerGas: feeData.maxFeePerGas ? `0x${feeData.maxFeePerGas.toString(16)}` : "0x2540be400",  // 10 Gwei
-              maxPriorityFeePerGas: feeData.maxPriorityFeePerGas ? `0x${feeData.maxPriorityFeePerGas.toString(16)}` : "0x3b9aca00",  // 1 Gwei
-              type: "0x2"  // EIP-1559 transaction type
-            }]
-          }
-        };
+        // Get gas limit from the request for UI display
+        const gasLimitHex = request.request.params[0].gasLimit;
+        const displayGasLimit = parseInt(gasLimitHex, 16);
+        // Get max fee values from the request for display
+        const maxFeePerGasHex = request.request.params[0].maxFeePerGas;
+        const maxPriorityFeePerGasHex = request.request.params[0].maxPriorityFeePerGas;
+        const maxFeePerGas = maxFeePerGasHex ? ethers.formatUnits(parseInt(maxFeePerGasHex, 16), 'gwei') : '10';
+        const maxPriorityFeePerGas = maxPriorityFeePerGasHex ? ethers.formatUnits(parseInt(maxPriorityFeePerGasHex, 16), 'gwei') : '1';
 
         // Show signing confirmation UI for the second step
         this.buffer.innerHTML = '';
@@ -1358,7 +1339,7 @@ class VimApp {
               </p>
               <p class="flex justify-between">
                 <span class="text-blue-400">Transaction Hash:</span>
-                <span class="text-blue-200">${truncateAddress(this.selectedTxHash)}</span>
+                <span class="text-blue-200">${truncateAddress(this.selectedTxHash || '')}</span>
               </p>
               <p class="flex justify-between">
                 <span class="text-blue-400">Network:</span>
@@ -1366,15 +1347,15 @@ class VimApp {
               </p>
               <p class="flex justify-between">
                 <span class="text-blue-400">Gas Limit:</span>
-                <span class="text-blue-200">${`0x${gasLimit.toString(16)}`}</span>
+                <span class="text-blue-200">${`0x${displayGasLimit.toString(16)}`}</span>
               </p>
               <p class="flex justify-between">
                 <span class="text-blue-400">Max Fee:</span>
-                <span class="text-blue-200">${feeData.maxFeePerGas ? ethers.formatUnits(feeData.maxFeePerGas, 'gwei') : '10'} Gwei</span>
+                <span class="text-blue-200">${maxFeePerGas} Gwei</span>
               </p>
               <p class="flex justify-between">
                 <span class="text-blue-400">Priority Fee:</span>
-                <span class="text-blue-200">${feeData.maxPriorityFeePerGas ? ethers.formatUnits(feeData.maxPriorityFeePerGas, 'gwei') : '1'} Gwei</span>
+                <span class="text-blue-200">${maxPriorityFeePerGas} Gwei</span>
               </p>
             </div>
           </div>
@@ -1971,37 +1952,16 @@ class VimApp {
         return;
       }
 
-      // Get fee data and estimate gas first
-      const feeData = await this.provider.getFeeData();
-      const gasEstimate = await this.provider.estimateGas({
-        from: this.signerAddress,
-        to: contractAddresses.safeTxPool,
-        data: encodedTxData,
-        value: "0x0"
+      // Prepare transaction request
+      const request = await prepareTransactionRequest({
+        provider: this.provider,
+        signerAddress: this.signerAddress!,
+        sessionTopic: this.sessionTopic!,
+        selectedNetwork: this.selectedNetwork,
+        contractAddress: contractAddresses.safeTxPool,
+        encodedTxData,
+        requestId: Math.floor(Math.random() * 1000000)
       });
-      
-      // Add 20% buffer to gas estimate for safety
-      const gasLimit = Math.floor(Number(gasEstimate) * 1.2);
-
-      const request = {
-        topic: this.sessionTopic,
-        chainId: `eip155:${this.selectedNetwork.chainId}`,
-        request: {
-          id: Math.floor(Math.random() * 1000000),
-          jsonrpc: '2.0',
-          method: 'eth_sendTransaction',
-          params: [{
-            from: this.signerAddress,
-            to: contractAddresses.safeTxPool,
-            data: encodedTxData,
-            value: "0x0",
-            gasLimit: `0x${gasLimit.toString(16)}`,
-            maxFeePerGas: feeData.maxFeePerGas ? `0x${feeData.maxFeePerGas.toString(16)}` : "0x2540be400",
-            maxPriorityFeePerGas: feeData.maxPriorityFeePerGas ? `0x${feeData.maxPriorityFeePerGas.toString(16)}` : "0x3b9aca00",
-            type: "0x2"
-          }]
-        }
-      };
 
       // Add transaction summary to the UI before sending
       const txSummary = document.createElement('div');
@@ -2072,7 +2032,7 @@ class VimApp {
           rejectionMsg.innerHTML = `
             <div class="flex items-center gap-3 mb-4">
               <svg class="w-6 h-6 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
               </svg>
               <h3 class="text-lg font-semibold text-yellow-100">Transaction Cancelled</h3>
             </div>
