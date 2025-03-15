@@ -1141,8 +1141,8 @@ class VimApp {
       // Use the stored transaction hash instead of looking for selected element
       if (!this.selectedTxHash) {
         this.buffer.textContent = 'Please select a transaction to sign using ↑/↓ keys';
-        this.buffer.className = 'flex-1 p-4 overflow-y-auto text-yellow-400';
-        return;
+      this.buffer.className = 'flex-1 p-4 overflow-y-auto text-yellow-400';
+      return;
       }
 
       try {
@@ -1300,6 +1300,18 @@ class VimApp {
         // Create a unique request ID
         const requestId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
+        // First estimate the gas
+        const gasEstimate = await this.provider.estimateGas({
+          from: this.signerAddress,
+          to: contractAddresses.safeTxPool,
+          data: encodedTxData,
+          value: "0x0"
+        });
+
+        // Add 20% buffer to the estimate for safety
+        const gasLimit = (gasEstimate * BigInt(120)) / BigInt(100);
+        console.log('Estimated gas:', gasEstimate.toString(), 'Using gas limit:', gasLimit.toString());
+
         // Prepare the transaction request with all necessary parameters
         const request = {
           topic: this.sessionTopic,
@@ -1313,8 +1325,8 @@ class VimApp {
               to: contractAddresses.safeTxPool,
               data: encodedTxData,
               value: "0x0",
-              // Add gas parameters
-              gasLimit: "0x55730",  // Appropriate gas limit for contract interaction
+              // Use estimated gas limit
+              gasLimit: `0x${gasLimit.toString(16)}`,
               maxFeePerGas: feeData.maxFeePerGas ? `0x${feeData.maxFeePerGas.toString(16)}` : "0x2540be400",  // 10 Gwei
               maxPriorityFeePerGas: feeData.maxPriorityFeePerGas ? `0x${feeData.maxPriorityFeePerGas.toString(16)}` : "0x3b9aca00",  // 1 Gwei
               type: "0x2"  // EIP-1559 transaction type
@@ -1354,7 +1366,7 @@ class VimApp {
               </p>
               <p class="flex justify-between">
                 <span class="text-blue-400">Gas Limit:</span>
-                <span class="text-blue-200">0x55730</span>
+                <span class="text-blue-200">${`0x${gasLimit.toString(16)}`}</span>
               </p>
               <p class="flex justify-between">
                 <span class="text-blue-400">Max Fee:</span>
@@ -1760,12 +1772,7 @@ class VimApp {
   }
 
   private async proposeToSafeTxPool(): Promise<void> {
-    // Use a flag to prevent duplicate requests
-    if (this._isProposing) {
-      console.log('Transaction proposal already in progress');
-      return;
-    }
-
+    if (this._isProposing || !this.txFormData) return;
     this._isProposing = true;
 
     try {
@@ -1964,7 +1971,18 @@ class VimApp {
         return;
       }
 
-      // Prepare the transaction request with explicit function data
+      // Get fee data and estimate gas first
+      const feeData = await this.provider.getFeeData();
+      const gasEstimate = await this.provider.estimateGas({
+        from: this.signerAddress,
+        to: contractAddresses.safeTxPool,
+        data: encodedTxData,
+        value: "0x0"
+      });
+      
+      // Add 20% buffer to gas estimate for safety
+      const gasLimit = Math.floor(Number(gasEstimate) * 1.2);
+
       const request = {
         topic: this.sessionTopic,
         chainId: `eip155:${this.selectedNetwork.chainId}`,
@@ -1977,11 +1995,10 @@ class VimApp {
             to: contractAddresses.safeTxPool,
             data: encodedTxData,
             value: "0x0",
-            // Add gas parameters
-            gasLimit: "0x55730",  // Appropriate gas limit for contract interaction
-            maxFeePerGas: "0x2540be400",  // 10 Gwei
-            maxPriorityFeePerGas: "0x3b9aca00",  // 1 Gwei
-            type: "0x2"  // EIP-1559 transaction type
+            gasLimit: `0x${gasLimit.toString(16)}`,
+            maxFeePerGas: feeData.maxFeePerGas ? `0x${feeData.maxFeePerGas.toString(16)}` : "0x2540be400",
+            maxPriorityFeePerGas: feeData.maxPriorityFeePerGas ? `0x${feeData.maxPriorityFeePerGas.toString(16)}` : "0x3b9aca00",
+            type: "0x2"
           }]
         }
       };
