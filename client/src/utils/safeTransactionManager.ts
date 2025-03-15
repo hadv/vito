@@ -1,6 +1,7 @@
 import { ethers } from 'ethers';
 import { NetworkConfig } from '../types/NetworkConfig';
 import { SAFE_TX_POOL_ABI } from '../config/contracts';
+import { SafeTransaction } from '../types/SafeTransactionData';
 
 // Interface for the contract
 type SafeTxPoolContract = ethers.Contract & {
@@ -34,18 +35,6 @@ type SafeTxPoolContract = ethers.Contract & {
   hasSignedTx: (txHash: string, signer: string) => Promise<boolean>;
   deleteTx: (txHash: string) => Promise<ethers.ContractTransactionResponse>;
 };
-
-export interface SafeTransaction {
-  txHash: string;
-  safe: string;
-  to: string;
-  value: string;
-  data: string;
-  operation: number;
-  proposer: string;
-  nonce: string;
-  signatures: string[];
-}
 
 export class SafeTxPool {
   private contract: SafeTxPoolContract;

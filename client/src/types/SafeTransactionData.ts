@@ -9,4 +9,11 @@ export interface SafeTransactionData {
   gasPrice?: string;
   gasToken?: string;
   refundReceiver?: string;
+}
+
+export interface SafeTransaction extends SafeTransactionData {
+  txHash: string;
+  safe: string;
+  proposer: string;
+  signatures: string[];
 } 
