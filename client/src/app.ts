@@ -4,13 +4,12 @@ import { ethers } from 'ethers';
 import { SignClient } from '@walletconnect/sign-client';
 import { SafeInfo } from './types/SafeInfo';
 import { NetworkConfig } from './types/NetworkConfig';
-import { calculateSafeTxHash } from './utils/safeTransactions';
 import { truncateAddress } from './utils/address';
 import { NETWORKS, DEFAULT_NETWORK, getNetworkConfig } from './config/networks';
 import { COMMANDS } from './config/commands';
 import { getContractAddress } from './config/contracts';
-import { SafeTxPool } from './utils/safeTransactionManager';
-import { prepareTransactionRequest } from './utils/transaction';
+import { SafeTxPool } from './managers/SafeTxPool';
+import { prepareTransactionRequest, calculateSafeTxHash } from './utils/transaction';
 
 class VimApp {
   private buffer: HTMLDivElement;
