@@ -887,6 +887,7 @@ class VimApp {
         // Store transaction details for later use
         const txDetailsMap = new Map();
         let currentFocusIndex = 0;
+        const self = this; // Store reference to VimApp instance
 
         // Fetch and display details for each transaction
         for (const [index, txHash] of pendingTxHashes.entries()) {
@@ -921,7 +922,18 @@ class VimApp {
             // Add selection to clicked row
             row.classList.add('bg-gray-700', 'selected-tx');
             // Store the selected transaction hash
-            this.selectedTxHash = row.getAttribute('data-tx-hash') || null;
+            self.selectedTxHash = row.getAttribute('data-tx-hash') || null;
+            
+            // Show transaction details
+            const txHash = row.getAttribute('data-tx-hash');
+            if (txHash) {
+              showTxDetails(txHash);
+            }
+            
+            // Focus the command input for immediate command entry
+            if (self.commandInput) {
+              self.commandInput.focus();
+            }
           });
 
           table.appendChild(row);
@@ -932,7 +944,7 @@ class VimApp {
         // Add help text
         const helpText = document.createElement('p');
         helpText.className = 'text-center text-gray-400 text-xs mt-4';
-        helpText.textContent = 'Use ↑/↓ keys to navigate, Enter to view details, Esc to collapse details';
+        helpText.textContent = 'Use ↑/↓ keys to navigate, Enter to view details, : to enter command mode, Esc to collapse details';
         container.appendChild(helpText);
 
         // Clear and update buffer
@@ -947,7 +959,7 @@ class VimApp {
               row.classList.add('bg-gray-700', 'selected-tx');
               row.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
               // Store the selected transaction hash
-              this.selectedTxHash = row.getAttribute('data-tx-hash') || null;
+              self.selectedTxHash = row.getAttribute('data-tx-hash') || null;
             } else {
               row.classList.remove('bg-gray-700', 'selected-tx');
             }
@@ -988,6 +1000,23 @@ class VimApp {
                   selectedRow.classList.add('bg-gray-700', 'selected-tx');
                 }
                 showTxDetails(selectedTxHash);
+                
+                // Focus the command input for immediate command entry
+                if (self.commandInput) {
+                  self.commandInput.focus();
+                }
+              }
+              break;
+              
+            case ':':
+              e.preventDefault();
+              // Focus the command input when colon is pressed
+              if (self.commandInput) {
+                self.commandInput.focus();
+                // Prepopulate with colon
+                self.commandInput.value = ':';
+                // Set cursor position after the colon
+                self.commandInput.setSelectionRange(1, 1);
               }
               break;
               
@@ -1006,6 +1035,17 @@ class VimApp {
           container.focus();
           updateFocus(0);
         }, 0);
+
+        // Add Escape key handler for command input to return focus to the transaction table
+        self.commandInput.addEventListener('keydown', (e: KeyboardEvent) => {
+          if (e.key === 'Escape') {
+            e.preventDefault();
+            // Clear any input
+            self.commandInput.value = '';
+            // Return focus to the container
+            container.focus();
+          }
+        });
 
         // Function to show transaction details
         const showTxDetails = (txHash: string) => {
