@@ -15,4 +15,5 @@ export const COMMANDS: Command[] = [
   { cmd: ':h', desc: 'Show this help guide' },
   { cmd: ':p', desc: 'Prepare and sign a transaction' },
   { cmd: ':pool', desc: 'Propose transaction to SafeTxPool' },
+  { cmd: ':del', desc: 'Delete selected pending transaction' },
 ]; 

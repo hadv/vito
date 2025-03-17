@@ -33,7 +33,10 @@ type SafeTxPoolContract = ethers.Contract & {
   signTx: (txHash: string, signature: string) => Promise<ethers.ContractTransactionResponse>;
   markAsExecuted: (txHash: string) => Promise<ethers.ContractTransactionResponse>;
   hasSignedTx: (txHash: string, signer: string) => Promise<boolean>;
-  deleteTx: (txHash: string) => Promise<ethers.ContractTransactionResponse>;
+  deleteTx: {
+    (txHash: string, overrides?: ethers.Overrides): Promise<ethers.ContractTransactionResponse>;
+    estimateGas(txHash: string, overrides?: ethers.Overrides): Promise<bigint>;
+  };
 };
 
 export class SafeTxPool {
@@ -176,13 +179,8 @@ export class SafeTxPool {
     return await this.contract.hasSignedTx(txHash, signer);
   }
 
-  async markTransactionAsExecuted(txHash: string, signer: ethers.Signer): Promise<void> {
+  async markAsExecuted(txHash: string, signer: ethers.Signer): Promise<void> {
     const contractWithSigner = this.contract.connect(signer) as SafeTxPoolContract;
     await contractWithSigner.markAsExecuted(txHash);
-  }
-
-  async deleteTransaction(txHash: string, signer: ethers.Signer): Promise<void> {
-    const contractWithSigner = this.contract.connect(signer) as SafeTxPoolContract;
-    await contractWithSigner.deleteTx(txHash);
   }
 } 

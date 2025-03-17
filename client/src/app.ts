@@ -703,6 +703,170 @@ class VimApp {
     // Focus command input
     this.commandInput.focus();
 
+    if (this.command === ':del') {
+      if (!this.selectedTxHash) {
+        this.buffer.textContent = 'Please select a transaction to delete';
+        this.buffer.className = 'flex-1 p-4 overflow-y-auto text-yellow-400';
+        return;
+      }
+
+      if (!this.signerAddress) {
+        this.buffer.textContent = 'Please connect a wallet first using :wc';
+        this.buffer.className = 'flex-1 p-4 overflow-y-auto text-yellow-400';
+        return;
+      }
+
+      if (!this.signClient || !this.sessionTopic) {
+        this.buffer.textContent = 'WalletConnect session not found. Please reconnect using :wc';
+        this.buffer.className = 'flex-1 p-4 overflow-y-auto text-yellow-400';
+        return;
+      }
+
+      try {
+        const contractAddresses = getContractAddress(this.selectedNetwork);
+        
+        // Create interface for the deleteTx function
+        const iface = new ethers.Interface([
+          "function deleteTx(bytes32 txHash) external"
+        ]);
+        
+        // Encode the function call data
+        const encodedTxData = iface.encodeFunctionData("deleteTx", [this.selectedTxHash]);
+        
+        // Prepare the transaction request
+        const request = await prepareTransactionRequest({
+          provider: this.provider,
+          signerAddress: this.signerAddress,
+          sessionTopic: this.sessionTopic,
+          selectedNetwork: this.selectedNetwork,
+          contractAddress: contractAddresses.safeTxPool,
+          encodedTxData,
+          requestId: Math.floor(Math.random() * 1000000)
+        });
+
+        // Update UI to show progress
+        this.buffer.textContent = 'Preparing to delete transaction...';
+        
+        // Add transaction summary to the UI before sending
+        const txSummary = document.createElement('div');
+        txSummary.className = 'max-w-2xl mx-auto mt-4 bg-red-900/50 p-6 rounded-lg border border-red-700 shadow-lg';
+        txSummary.innerHTML = `
+          <div class="flex items-center gap-3 mb-4">
+            <svg class="w-6 h-6 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+            </svg>
+            <h3 class="text-xl font-semibold text-red-200">Delete Transaction</h3>
+          </div>
+          <div class="space-y-2 text-sm">
+            <p class="flex justify-between">
+              <span class="text-red-400">Transaction Hash:</span>
+              <span class="text-red-200">${truncateAddress(this.selectedTxHash)}</span>
+            </p>
+            <p class="flex justify-between">
+              <span class="text-red-400">Action:</span>
+              <span class="text-red-200">Delete Transaction</span>
+            </p>
+            <p class="text-yellow-300 mt-2">Please confirm this action in your wallet. This cannot be undone.</p>
+          </div>
+        `;
+        this.buffer.appendChild(txSummary);
+
+        // Send the transaction with proper error handling
+        let txHash;
+        try {
+          // Send the request and wait for response
+          txHash = await this.signClient.request(request);
+          
+          if (!txHash || typeof txHash !== 'string') {
+            throw new Error('Invalid transaction hash received');
+          }
+          
+          // Show pending transaction message
+          const pendingMsg = document.createElement('div');
+          pendingMsg.className = 'text-blue-300 mt-4';
+          pendingMsg.textContent = `Transaction submitted! Waiting for confirmation...`;
+          this.buffer.appendChild(pendingMsg);
+          
+          // Wait for transaction to be mined
+          await this.provider.waitForTransaction(txHash);
+          
+          // Clear selection and refresh the transaction list
+          this.selectedTxHash = null;
+          
+          // Show success message
+          const successMsg = document.createElement('div');
+          successMsg.className = 'text-green-400 mt-4 p-4 bg-green-900/30 rounded-lg border border-green-800';
+          successMsg.innerHTML = `
+            <div class="flex items-center gap-2">
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+              </svg>
+              <span class="font-medium">Transaction deleted successfully!</span>
+            </div>
+            <p class="mt-2 text-sm">Transaction hash: ${truncateAddress(txHash)}</p>
+          `;
+          this.buffer.appendChild(successMsg);
+          
+          // Add a button to refresh the transaction list
+          const refreshButton = document.createElement('button');
+          refreshButton.className = 'mt-4 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors';
+          refreshButton.textContent = 'Refresh Transaction List';
+          refreshButton.onclick = async () => {
+            this.command = ':l';
+            await this.executeCommand();
+          };
+          this.buffer.appendChild(refreshButton);
+          
+        } catch (error: any) {
+          console.error('Transaction request failed:', error);
+          
+          // Show error message
+          const errorMsg = document.createElement('div');
+          errorMsg.className = 'text-red-400 mt-4 p-4 bg-red-900/30 rounded-lg border border-red-800';
+          
+          if (error.code === 4001) {
+            // User rejected the transaction
+            errorMsg.innerHTML = `
+              <div class="flex items-center gap-2">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+                </svg>
+                <span class="font-medium">Transaction cancelled</span>
+              </div>
+              <p class="mt-2 text-sm">You rejected the transaction.</p>
+            `;
+          } else if (error.message?.includes('NotProposer')) {
+            errorMsg.innerHTML = `
+              <div class="flex items-center gap-2">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+                </svg>
+                <span class="font-medium">Permission Error</span>
+              </div>
+              <p class="mt-2 text-sm">Only the proposer can delete this transaction.</p>
+            `;
+          } else {
+            errorMsg.innerHTML = `
+              <div class="flex items-center gap-2">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+                </svg>
+                <span class="font-medium">Transaction Failed</span>
+              </div>
+              <p class="mt-2 text-sm">Error: ${error.message || 'Unknown error'}</p>
+            `;
+          }
+          
+          this.buffer.appendChild(errorMsg);
+        }
+      } catch (error: any) {
+        console.error('Failed to delete transaction:', error);
+        this.buffer.textContent = `Failed to delete transaction: ${error.message || 'Unknown error'}`;
+        this.buffer.className = 'flex-1 p-4 overflow-y-auto text-red-400';
+      }
+      return;
+    }
+    
     if (this.command === ':c') {
       if (!this.safeAddressInput) {
         this.buffer.textContent = 'Please enter a Safe address in the input field';
