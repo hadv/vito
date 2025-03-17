@@ -1297,23 +1297,6 @@ class VimApp {
         return;
       }
       this.showTransactionScreen();
-    } else if (this.command === ':p') {
-      if (this.mode !== 'TX') {
-        this.buffer.textContent = 'Please switch to TX mode first by pressing "e" key';
-        this.buffer.className = 'flex-1 p-4 overflow-y-auto text-yellow-400';
-        return;
-      }
-      if (!this.safeAddress) {
-        this.buffer.textContent = 'Please connect a Safe address with :c first';
-        this.buffer.className = 'flex-1 p-4 overflow-y-auto text-yellow-400';
-        return;
-      }
-      if (!this.signerAddress) {
-        this.buffer.textContent = 'Please connect wallet with :wc first';
-        this.buffer.className = 'flex-1 p-4 overflow-y-auto text-yellow-400';
-        return;
-      }
-      await this.proposeToSafeTxPool();
     } else if (this.command === ':dc') {
       if (!this.signerAddress) {
         this.buffer.textContent = 'No wallet connected to disconnect';
@@ -1885,7 +1868,7 @@ class VimApp {
     // Add helper text
     const helperText = document.createElement('p');
     helperText.className = 'mt-6 text-sm text-gray-400';
-    helperText.textContent = 'Fill in the transaction details and use :p command to prepare and sign the transaction.';
+    helperText.textContent = 'Fill in the transaction details and use :pool command to propose the transaction.';
     form.appendChild(helperText);
 
     // Assemble the form
