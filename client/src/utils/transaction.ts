@@ -83,12 +83,12 @@ export const calculateSafeTxHash = (
     refundReceiver: transaction.refundReceiver || '0x0000000000000000000000000000000000000000',
   };
 
-  // Prepare EIP-712 typed data
+  // Prepare EIP-712 typed data with Safe's domain separator
   const typedData = {
     types: {
       EIP712Domain: [
-        { name: 'verifyingContract', type: 'address' },
-        { name: 'chainId', type: 'uint256' }
+        { name: 'chainId', type: 'uint256' },
+        { name: 'verifyingContract', type: 'address' }
       ],
       SafeTx: [
         { name: 'to', type: 'address' },
@@ -105,8 +105,8 @@ export const calculateSafeTxHash = (
     },
     primaryType: 'SafeTx',
     domain: {
-      verifyingContract: safeAddress,
-      chainId
+      chainId,
+      verifyingContract: safeAddress
     },
     message: txData
   };
