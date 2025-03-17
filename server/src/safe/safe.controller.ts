@@ -96,4 +96,88 @@ export class SafeController {
       );
     }
   }
+
+  @Post('pending-transactions')
+  async getPendingTransactions(
+    @Body('safeAddress') safeAddress: string,
+    @Body('network') network: string,
+  ) {
+    try {
+      if (!safeAddress) {
+        throw new Error('safeAddress is required');
+      }
+      if (!network) {
+        throw new Error('network is required');
+      }
+
+      const transactions = await this.safeService.getPendingTransactions(safeAddress, network);
+      return { transactions };
+    } catch (error) {
+      console.error('Error in getPendingTransactions controller:', error);
+      throw new HttpException(
+        error.message || 'Failed to fetch pending transactions',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  @Post('add-signature')
+  async addSignature(
+    @Body('safeAddress') safeAddress: string,
+    @Body('safeTxHash') safeTxHash: string,
+    @Body('signature') signature: string,
+    @Body('network') network: string,
+  ) {
+    try {
+      if (!safeAddress) {
+        throw new Error('safeAddress is required');
+      }
+      if (!safeTxHash) {
+        throw new Error('safeTxHash is required');
+      }
+      if (!signature) {
+        throw new Error('signature is required');
+      }
+      if (!network) {
+        throw new Error('network is required');
+      }
+
+      const result = await this.safeService.addSignature(safeAddress, safeTxHash, signature, network);
+      return result;
+    } catch (error) {
+      console.error('Error in addSignature controller:', error);
+      throw new HttpException(
+        error.message || 'Failed to add signature',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  @Post('execute-transaction')
+  async executeTransaction(
+    @Body('safeAddress') safeAddress: string,
+    @Body('safeTxHash') safeTxHash: string,
+    @Body('network') network: string,
+  ) {
+    try {
+      if (!safeAddress) {
+        throw new Error('safeAddress is required');
+      }
+      if (!safeTxHash) {
+        throw new Error('safeTxHash is required');
+      }
+      if (!network) {
+        throw new Error('network is required');
+      }
+
+      const result = await this.safeService.executeTransaction(safeAddress, safeTxHash, network);
+      return result;
+    } catch (error) {
+      console.error('Error in executeTransaction controller:', error);
+      throw new HttpException(
+        error.message || 'Failed to execute transaction',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
 }

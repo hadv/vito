@@ -4,10 +4,12 @@ import { ethers } from 'ethers';
 import { SignClient } from '@walletconnect/sign-client';
 import { SafeInfo } from './types/SafeInfo';
 import { NetworkConfig } from './types/NetworkConfig';
-import { calculateSafeTxHash } from './utils/safeTransactions';
-import { truncateAddress } from './utils/addressUtils';
+import { truncateAddress } from './utils/address';
 import { NETWORKS, DEFAULT_NETWORK, getNetworkConfig } from './config/networks';
 import { COMMANDS } from './config/commands';
+import { getContractAddress } from './config/contracts';
+import { SafeTxPool } from './managers/SafeTxPool';
+import { prepareTransactionRequest, calculateSafeTxHash } from './utils/transaction';
 
 class VimApp {
   private buffer: HTMLDivElement;
@@ -25,12 +27,12 @@ class VimApp {
   private command: string = '';
   private safeAddress: string | null = null;
   private signerAddress: string | null = null;
-  private socket: Socket;
-  private provider: ethers.JsonRpcProvider;
+  private socket!: Socket;
+  private provider!: ethers.JsonRpcProvider;
   private signClient: any; // WalletConnect SignClient instance
   private sessionTopic: string | null = null; // Store the WalletConnect session topic
   private cachedSafeInfo: SafeInfo | null = null;
-  private selectedNetwork: NetworkConfig;
+  private selectedNetwork!: NetworkConfig;
   private isConnecting: boolean = false; // Add flag to track connection state
   // Add transaction form data storage
   private txFormData: {
@@ -38,6 +40,8 @@ class VimApp {
     value: string;
     data: string;
   } | null = null;
+  private _isProposing: boolean = false;
+  private selectedTxHash: string | null = null; // Add this property to store selected transaction hash
 
   constructor() {
     this.buffer = document.getElementById('buffer') as HTMLDivElement;
@@ -51,6 +55,12 @@ class VimApp {
     this.safeAddressDisplay = document.getElementById('safe-address-display') as HTMLSpanElement;
     this.signerAddressDisplay = document.getElementById('signer-address-display') as HTMLSpanElement;
     this.commandInput = document.getElementById('command-input') as HTMLInputElement;
+
+    // Check if command input exists
+    if (!this.commandInput) {
+      console.error('Command input element not found');
+      return;
+    }
 
     // Set default network
     this.selectedNetwork = getNetworkConfig(DEFAULT_NETWORK);
@@ -76,28 +86,55 @@ class VimApp {
     this.initSocketListeners();
     this.updateStatus();
 
+    // Make sure main content is visible
+    this.mainContent.classList.remove('hidden');
+    this.buffer.classList.remove('hidden');
+
     // Focus command input last
     setTimeout(() => {
       this.commandInput.focus();
     }, 100);
 
-    // Check for Safe address in URL parameters
-    const urlParams = new URLSearchParams(window.location.search);
-    const safeAddress = urlParams.get('safe');
-    if (safeAddress && this.safeAddressInput) {
-      this.safeAddressInput.value = safeAddress;
-      this.safeAddressInput.readOnly = true;
-      this.safeAddressInput.classList.add('opacity-50', 'cursor-pointer');
-      this.commandInput.focus();
-      
-      // Automatically connect to the Safe wallet
-      this.connectWallet(safeAddress).catch(error => {
-        console.error('Failed to auto-connect to Safe:', error);
-        this.buffer.innerHTML = '';
-        const errorMsg = document.createElement('p');
-        errorMsg.textContent = `Error: ${error instanceof Error ? error.message : 'Failed to connect to Safe'}`;
-        errorMsg.className = 'text-red-500';
-        this.buffer.appendChild(errorMsg);
+    // Re-initialize references
+    this.inputContainer = document.getElementById('input-container') as HTMLDivElement;
+    this.safeAddressInput = document.getElementById('safe-address-input') as HTMLInputElement;
+    this.networkSelect = document.getElementById('network-select') as HTMLSelectElement;
+    
+    // Add paste event handler and click-to-edit functionality for Safe address input
+    if (this.safeAddressInput) {
+      // Handle paste event
+      this.safeAddressInput.addEventListener('paste', () => {
+        setTimeout(() => {
+          if (this.safeAddressInput) {
+            this.safeAddressInput.disabled = false;
+            this.commandInput.focus();
+          }
+        }, 100);
+      });
+
+      // Handle click to edit
+      this.safeAddressInput.addEventListener('click', function() {
+        if (this.disabled) {
+          this.disabled = false;
+          this.focus();
+        }
+      });
+
+      // Handle focus to enable editing
+      this.safeAddressInput.addEventListener('focus', function() {
+        if (this.disabled) {
+          this.disabled = false;
+        }
+      });
+    }
+
+    // Ensure default network is selected
+    if (this.networkSelect) {
+      this.networkSelect.value = DEFAULT_NETWORK;
+      // Update the provider when network changes
+      this.networkSelect.addEventListener('change', () => {
+        this.selectedNetwork = getNetworkConfig(this.networkSelect!.value);
+        this.provider = new ethers.JsonRpcProvider(this.selectedNetwork.provider);
       });
     }
   }
@@ -105,6 +142,8 @@ class VimApp {
   private initEventListeners(): void {
     // Simple keydown handler for command input
     this.commandInput.addEventListener('keydown', async (e: KeyboardEvent) => {
+      console.log('Keydown event:', e.key); // Add logging
+      
       if (e.key === ':') {
         this.command = ':';
         this.updateStatus();
@@ -134,6 +173,11 @@ class VimApp {
         this.commandInput.focus();
       }
     });
+
+    // Ensure command input is focused initially
+    setTimeout(() => {
+      this.commandInput.focus();
+    }, 100);
   }
 
   private showInitialInputContainer(): void {
@@ -146,7 +190,7 @@ class VimApp {
     // Create new input container with network selection and Safe address input
     const newContainer = document.createElement('div');
     newContainer.id = 'input-container';
-    newContainer.className = 'w-full sm:w-1/2 p-4';
+    newContainer.className = 'w-full sm:w-2/3 p-4';
     newContainer.innerHTML = `
       <div class="space-y-4 sm:space-y-0">
         <div class="relative flex flex-col sm:flex-row sm:items-center sm:gap-4">
@@ -157,7 +201,7 @@ class VimApp {
             <input 
               type="text" 
               id="safe-address-input" 
-              class="block pl-14 pr-2.5 py-4 w-full text-white bg-[#2c2c2c] rounded-lg border border-gray-700 appearance-none focus:outline-none focus:ring-0 focus:border-blue-600 peer" 
+              class="block pl-14 pr-2.5 py-4 w-full text-white bg-[#2c2c2c] rounded-lg border border-gray-700 appearance-none focus:outline-none focus:ring-0 focus:border-blue-600 peer cursor-pointer" 
               placeholder=" "
             />
             <label 
@@ -168,9 +212,9 @@ class VimApp {
             </label>
           </div>
           <div class="flex-shrink-0 relative mt-4 sm:mt-0">
-            <select id="network-select" class="block w-full sm:w-36 h-[58px] px-3 text-white bg-[#2c2c2c] border border-gray-700 rounded-lg focus:outline-none focus:ring-0 focus:border-blue-600 appearance-none cursor-pointer">
+            <select id="network-select" class="block w-full sm:w-48 h-[58px] px-3 text-white bg-[#2c2c2c] border border-gray-700 rounded-lg focus:outline-none focus:ring-0 focus:border-blue-600 appearance-none cursor-pointer">
               ${Object.entries(NETWORKS).map(([key, network]) => 
-                `<option value="${key}">${network.displayName}</option>`
+                `<option value="${key}" ${key === DEFAULT_NETWORK ? 'selected' : ''}>${network.displayName}</option>`
               ).join('')}
             </select>
             <div class="absolute inset-y-0 right-0 flex items-center pr-2 pointer-events-none">
@@ -192,131 +236,47 @@ class VimApp {
     this.safeAddressInput = document.getElementById('safe-address-input') as HTMLInputElement;
     this.networkSelect = document.getElementById('network-select') as HTMLSelectElement;
 
-    // Check for Safe address in URL parameters
-    const urlParams = new URLSearchParams(window.location.search);
-    const safeAddress = urlParams.get('safe');
-    if (safeAddress && this.safeAddressInput) {
-      this.safeAddressInput.value = safeAddress;
-      this.safeAddressInput.readOnly = true;
-      this.safeAddressInput.classList.add('opacity-50', 'cursor-pointer');
-      this.commandInput.focus();
-      
-      // Automatically connect to the Safe wallet
-      this.connectWallet(safeAddress).catch(error => {
-        console.error('Failed to auto-connect to Safe:', error);
-        this.buffer.innerHTML = '';
-        const errorMsg = document.createElement('p');
-        errorMsg.textContent = `Error: ${error instanceof Error ? error.message : 'Failed to connect to Safe'}`;
-        errorMsg.className = 'text-red-500';
-        this.buffer.appendChild(errorMsg);
-      });
-    }
-
-    // Add event listeners for command input handling
+    // Add paste event handler and click-to-edit functionality for Safe address input
     if (this.safeAddressInput) {
-      this.safeAddressInput.addEventListener('keydown', (e) => {
-        // Allow command input to capture : key for starting commands
-        if (e.key === ':') {
-          e.preventDefault();
-          this.commandInput.focus();
-          this.command = ':';
-          this.updateStatus();
-        }
-      });
-
+      // Handle paste event
       this.safeAddressInput.addEventListener('paste', () => {
         setTimeout(() => {
           if (this.safeAddressInput) {
-            this.safeAddressInput.readOnly = true;
-            this.safeAddressInput.classList.add('opacity-50', 'cursor-pointer');
+            this.safeAddressInput.disabled = false;
             this.commandInput.focus();
           }
-        }, 10);
-      });
-
-      this.safeAddressInput.addEventListener('click', (e) => {
-        e.stopPropagation();
-        if (this.safeAddressInput && this.safeAddressInput.readOnly) {
-          this.safeAddressInput.readOnly = false;
-          this.safeAddressInput.classList.remove('opacity-50', 'cursor-pointer');
-          this.safeAddressInput.focus();
-        }
-      });
-    }
-
-    if (this.networkSelect) {
-      this.networkSelect.addEventListener('keydown', (e) => {
-        // Allow command input to capture : key for starting commands
-        if (e.key === ':') {
-          e.preventDefault();
-          this.commandInput.focus();
-          this.command = ':';
-          this.updateStatus();
-        }
-      });
-
-      this.networkSelect.addEventListener('click', (e) => {
-        e.stopPropagation();
-      });
-
-      this.networkSelect.addEventListener('change', async (e) => {
-        e.stopPropagation();
-        const selectedNetwork = (e.target as HTMLSelectElement).value;
-        
-        // Clear any existing Safe info cache when network changes
-        this.clearSafeInfoCache();
-        
-        // Update network and provider
-        this.selectedNetwork = getNetworkConfig(selectedNetwork);
-        this.provider = new ethers.JsonRpcProvider(this.selectedNetwork.provider);
-        
-        // If a Safe is connected, verify it exists on the new network
-        if (this.safeAddress) {
-          try {
-            const code = await this.provider.getCode(this.safeAddress);
-            if (code === '0x') {
-              this.buffer.innerHTML = '';
-              const warningMsg = document.createElement('p');
-              warningMsg.textContent = `Warning: Safe ${this.safeAddress} does not exist on ${this.selectedNetwork.displayName}`;
-              warningMsg.className = 'text-yellow-400';
-              this.buffer.appendChild(warningMsg);
-            }
-          } catch (error) {
-            console.error('Error checking Safe on new network:', error);
-            this.buffer.innerHTML = '';
-            const errorMsg = document.createElement('p');
-            errorMsg.textContent = `Error: Failed to verify Safe on ${this.selectedNetwork.displayName}`;
-            errorMsg.className = 'text-red-500';
-            this.buffer.appendChild(errorMsg);
-          }
-    }
-
-        // Focus command input after network selection
-        setTimeout(() => {
-          this.commandInput.focus();
         }, 100);
       });
+
+      // Handle click to edit
+      this.safeAddressInput.addEventListener('click', function() {
+        if (this.disabled) {
+          this.disabled = false;
+          this.focus();
+        }
+      });
+
+      // Handle focus to enable editing
+      this.safeAddressInput.addEventListener('focus', function() {
+        if (this.disabled) {
+          this.disabled = false;
+        }
+      });
     }
 
-    // Add container-level event listeners
-    this.inputContainer?.addEventListener('click', (e) => {
-      e.stopPropagation();
-    });
-
-    // Update help container classes for mobile responsiveness
+    // Make sure help container is visible and properly styled
     const helpContainer = document.getElementById('help-container') as HTMLDivElement;
-    helpContainer.className = 'w-full sm:w-1/2 p-4';
+    helpContainer.className = 'w-full sm:w-1/3 p-4';
     helpContainer.classList.remove('hidden');
 
     // Update main content layout for mobile responsiveness
     mainContentDiv.className = 'flex flex-col sm:flex-row w-full';
 
-    // Ensure command input is focused initially
+    // Ensure command input is focused
     setTimeout(() => {
       this.commandInput.focus();
     }, 100);
   }
-
 
   private async resolveEnsName(address: string): Promise<string | null> {
     try {
@@ -403,8 +363,8 @@ class VimApp {
       this.buffer.classList.remove('hidden');
       this.helpScreen.classList.add('hidden');
       
-      // Update help container classes to match input container spacing
-      this.helpContainer.className = 'flex-1 p-4';
+      // Update help container classes
+      this.helpContainer.className = 'w-full sm:w-1/2 p-4';
     } else {
       // If input field is not visible, show help in help-screen
       this.helpScreen.appendChild(mainContainer);
@@ -439,7 +399,7 @@ class VimApp {
 
       // Update the Safe address display with ENS name if available
       if (this.safeAddressDisplay) {
-        const ensName = await this.resolveEnsName(safeAddress);
+      const ensName = await this.resolveEnsName(safeAddress);
         this.safeAddressDisplay.textContent = ensName 
           ? `${ensName} (${truncateAddress(safeAddress)})` 
           : truncateAddress(safeAddress);
@@ -468,8 +428,8 @@ class VimApp {
         this.networkSelect = null;
       }
         
-      // Clear the buffer and show success message
-      this.buffer.innerHTML = '';
+        // Clear the buffer and show success message
+        this.buffer.innerHTML = '';
       const successMsg = document.createElement('p');
       successMsg.textContent = 'Successfully connected to Safe!';
       successMsg.className = 'text-green-400';
@@ -740,6 +700,173 @@ class VimApp {
     this.helpScreen.classList.add('hidden');
     this.buffer.innerHTML = '';
 
+    // Focus command input
+    this.commandInput.focus();
+
+    if (this.command === ':del') {
+      if (!this.selectedTxHash) {
+        this.buffer.textContent = 'Please select a transaction to delete';
+        this.buffer.className = 'flex-1 p-4 overflow-y-auto text-yellow-400';
+        return;
+      }
+
+      if (!this.signerAddress) {
+        this.buffer.textContent = 'Please connect a wallet first using :wc';
+        this.buffer.className = 'flex-1 p-4 overflow-y-auto text-yellow-400';
+        return;
+      }
+
+      if (!this.signClient || !this.sessionTopic) {
+        this.buffer.textContent = 'WalletConnect session not found. Please reconnect using :wc';
+        this.buffer.className = 'flex-1 p-4 overflow-y-auto text-yellow-400';
+        return;
+      }
+
+      try {
+        const contractAddresses = getContractAddress(this.selectedNetwork);
+        
+        // Create interface for the deleteTx function
+        const iface = new ethers.Interface([
+          "function deleteTx(bytes32 txHash) external"
+        ]);
+        
+        // Encode the function call data
+        const encodedTxData = iface.encodeFunctionData("deleteTx", [this.selectedTxHash]);
+        
+        // Prepare the transaction request
+        const request = await prepareTransactionRequest({
+          provider: this.provider,
+          signerAddress: this.signerAddress,
+          sessionTopic: this.sessionTopic,
+          selectedNetwork: this.selectedNetwork,
+          contractAddress: contractAddresses.safeTxPool,
+          encodedTxData,
+          requestId: Math.floor(Math.random() * 1000000)
+        });
+
+        // Update UI to show progress
+        this.buffer.textContent = 'Preparing to delete transaction...';
+        
+        // Add transaction summary to the UI before sending
+        const txSummary = document.createElement('div');
+        txSummary.className = 'max-w-2xl mx-auto mt-4 bg-red-900/50 p-6 rounded-lg border border-red-700 shadow-lg';
+        txSummary.innerHTML = `
+          <div class="flex items-center gap-3 mb-4">
+            <svg class="w-6 h-6 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+            </svg>
+            <h3 class="text-xl font-semibold text-red-200">Delete Transaction</h3>
+          </div>
+          <div class="space-y-2 text-sm">
+            <p class="flex justify-between">
+              <span class="text-red-400">Transaction Hash:</span>
+              <span class="text-red-200">${truncateAddress(this.selectedTxHash)}</span>
+            </p>
+            <p class="flex justify-between">
+              <span class="text-red-400">Action:</span>
+              <span class="text-red-200">Delete Transaction</span>
+            </p>
+            <p class="text-yellow-300 mt-2">Please confirm this action in your wallet. This cannot be undone.</p>
+          </div>
+        `;
+        this.buffer.appendChild(txSummary);
+
+        // Send the transaction with proper error handling
+        let txHash;
+        try {
+          // Send the request and wait for response
+          txHash = await this.signClient.request(request);
+          
+          if (!txHash || typeof txHash !== 'string') {
+            throw new Error('Invalid transaction hash received');
+          }
+          
+          // Show pending transaction message
+          const pendingMsg = document.createElement('div');
+          pendingMsg.className = 'text-blue-300 mt-4';
+          pendingMsg.textContent = `Transaction submitted! Waiting for confirmation...`;
+          this.buffer.appendChild(pendingMsg);
+          
+          // Wait for transaction to be mined
+          await this.provider.waitForTransaction(txHash);
+          
+          // Clear selection and refresh the transaction list
+          this.selectedTxHash = null;
+          
+          // Show success message
+          const successMsg = document.createElement('div');
+          successMsg.className = 'text-green-400 mt-4 p-4 bg-green-900/30 rounded-lg border border-green-800';
+          successMsg.innerHTML = `
+            <div class="flex items-center gap-2">
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+              </svg>
+              <span class="font-medium">Transaction deleted successfully!</span>
+            </div>
+            <p class="mt-2 text-sm">Transaction hash: ${truncateAddress(txHash)}</p>
+          `;
+          this.buffer.appendChild(successMsg);
+          
+          // Add a button to refresh the transaction list
+          const refreshButton = document.createElement('button');
+          refreshButton.className = 'mt-4 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors';
+          refreshButton.textContent = 'Refresh Transaction List';
+          refreshButton.onclick = async () => {
+            this.command = ':l';
+            await this.executeCommand();
+          };
+          this.buffer.appendChild(refreshButton);
+          
+        } catch (error: any) {
+          console.error('Transaction request failed:', error);
+          
+          // Show error message
+          const errorMsg = document.createElement('div');
+          errorMsg.className = 'text-red-400 mt-4 p-4 bg-red-900/30 rounded-lg border border-red-800';
+          
+          if (error.code === 4001) {
+            // User rejected the transaction
+            errorMsg.innerHTML = `
+              <div class="flex items-center gap-2">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+                </svg>
+                <span class="font-medium">Transaction cancelled</span>
+              </div>
+              <p class="mt-2 text-sm">You rejected the transaction.</p>
+            `;
+          } else if (error.message?.includes('NotProposer')) {
+            errorMsg.innerHTML = `
+              <div class="flex items-center gap-2">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+                </svg>
+                <span class="font-medium">Permission Error</span>
+              </div>
+              <p class="mt-2 text-sm">Only the proposer can delete this transaction.</p>
+            `;
+          } else {
+            errorMsg.innerHTML = `
+              <div class="flex items-center gap-2">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+                </svg>
+                <span class="font-medium">Transaction Failed</span>
+              </div>
+              <p class="mt-2 text-sm">Error: ${error.message || 'Unknown error'}</p>
+            `;
+          }
+          
+          this.buffer.appendChild(errorMsg);
+        }
+      } catch (error: any) {
+        console.error('Failed to delete transaction:', error);
+        this.buffer.textContent = `Failed to delete transaction: ${error.message || 'Unknown error'}`;
+        this.buffer.className = 'flex-1 p-4 overflow-y-auto text-red-400';
+      }
+      return;
+    }
+    
     if (this.command === ':c') {
       if (!this.safeAddressInput) {
         this.buffer.textContent = 'Please enter a Safe address in the input field';
@@ -871,6 +998,288 @@ class VimApp {
     } else if (this.command === ':h') {
       // Show help guide
       this.showHelpGuide();
+    } else if (this.command === ':l') {
+      if (!this.safeAddress) {
+        this.buffer.textContent = 'Please connect a Safe address with :c first';
+        this.buffer.className = 'flex-1 p-4 overflow-y-auto text-yellow-400';
+        return;
+      }
+
+      try {
+        // Get contract address for the current network
+        const contractAddresses = getContractAddress(this.selectedNetwork);
+        const safeTxPool = new SafeTxPool(contractAddresses.safeTxPool, this.selectedNetwork);
+        
+        // Get pending transactions
+        const pendingTxHashes = await safeTxPool.getPendingTransactions(this.safeAddress);
+        
+        if (pendingTxHashes.length === 0) {
+          this.buffer.innerHTML = `
+            <div class="max-w-4xl mx-auto bg-gray-800 p-6 rounded-lg border border-gray-700 shadow-lg">
+              <p class="text-gray-400">No pending transactions found</p>
+            </div>
+          `;
+          return;
+        }
+
+        // Create container for transactions table
+        const container = document.createElement('div');
+        container.className = 'max-w-4xl mx-auto';
+        container.setAttribute('tabindex', '0'); // Make container focusable
+        
+        // Create table
+        const table = document.createElement('div');
+        table.className = 'min-w-full bg-gray-800 rounded-lg border border-gray-700 shadow-lg overflow-hidden';
+        table.id = 'tx-table';
+
+        // Table header
+        const header = document.createElement('div');
+        header.className = 'bg-gray-900 px-4 py-3 border-b border-gray-700';
+        header.innerHTML = `
+          <div class="grid grid-cols-12 gap-4 text-xs font-medium text-gray-400">
+            <div class="col-span-3">Hash</div>
+            <div class="col-span-3">To</div>
+            <div class="col-span-2">Value</div>
+            <div class="col-span-1">Nonce</div>
+            <div class="col-span-2">Proposer</div>
+            <div class="col-span-1">Sigs</div>
+          </div>
+        `;
+        table.appendChild(header);
+
+        // Store transaction details for later use
+        const txDetailsMap = new Map();
+        let currentFocusIndex = 0;
+        const self = this; // Store reference to VimApp instance
+
+        // Fetch and display details for each transaction
+        for (const [index, txHash] of pendingTxHashes.entries()) {
+          const txDetails = await safeTxPool.getTransactionDetails(txHash);
+          txDetailsMap.set(txHash, txDetails);
+          const valueInEth = ethers.formatEther(txDetails.value);
+          
+          const row = document.createElement('div');
+          row.className = 'px-4 py-3 border-b border-gray-700 hover:bg-gray-700/50 cursor-pointer';
+          row.setAttribute('data-tx-hash', txHash);
+          row.setAttribute('data-index', index.toString());
+          row.innerHTML = `
+            <div class="grid grid-cols-12 gap-4 text-xs">
+              <div class="col-span-3 font-mono text-blue-400">${truncateAddress(txHash)}</div>
+              <div class="col-span-3 font-mono text-gray-300">${truncateAddress(txDetails.to)}</div>
+              <div class="col-span-2 text-gray-300">${Number(valueInEth) > 0 ? `${valueInEth} ETH` : '-'}</div>
+              <div class="col-span-1 text-gray-300">${txDetails.nonce}</div>
+              <div class="col-span-2 font-mono text-gray-300">${truncateAddress(txDetails.proposer)}</div>
+              <div class="col-span-1 text-gray-300">${txDetails.signatures.length}</div>
+            </div>
+          `;
+          
+          // Add click handler for selection
+          row.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const clickedIndex = parseInt(row.getAttribute('data-index') || '0');
+            currentFocusIndex = clickedIndex;
+            // Remove selection from all rows
+            document.querySelectorAll('#tx-table > div:not(:first-child)').forEach(r => {
+              r.classList.remove('bg-gray-700', 'selected-tx');
+            });
+            // Add selection to clicked row
+            row.classList.add('bg-gray-700', 'selected-tx');
+            // Store the selected transaction hash
+            self.selectedTxHash = row.getAttribute('data-tx-hash') || null;
+            
+            // Show transaction details
+            const txHash = row.getAttribute('data-tx-hash');
+            if (txHash) {
+              showTxDetails(txHash);
+            }
+            
+            // Focus the command input for immediate command entry
+            if (self.commandInput) {
+              self.commandInput.focus();
+            }
+          });
+
+          table.appendChild(row);
+        }
+
+        container.appendChild(table);
+        
+        // Add help text
+        const helpText = document.createElement('p');
+        helpText.className = 'text-center text-gray-400 text-xs mt-4';
+        helpText.textContent = 'Use ↑/↓ keys to navigate, Enter to view details, : to enter command mode, Esc to collapse details';
+        container.appendChild(helpText);
+
+        // Clear and update buffer
+        this.buffer.innerHTML = '';
+        this.buffer.appendChild(container);
+
+        // Function to update focus and selection
+        const updateFocus = (index: number) => {
+          const rows = document.querySelectorAll('#tx-table > div:not(:first-child)');
+          rows.forEach((row, i) => {
+            if (i === index) {
+              row.classList.add('bg-gray-700', 'selected-tx');
+              row.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+              // Store the selected transaction hash
+              self.selectedTxHash = row.getAttribute('data-tx-hash') || null;
+            } else {
+              row.classList.remove('bg-gray-700', 'selected-tx');
+            }
+          });
+          currentFocusIndex = index;
+        };
+
+        // Add keyboard navigation
+        container.addEventListener('keydown', (e: KeyboardEvent) => {
+          const totalTx = pendingTxHashes.length;
+          
+          switch (e.key) {
+            case 'ArrowUp':
+              e.preventDefault();
+              if (currentFocusIndex > 0) {
+                updateFocus(currentFocusIndex - 1);
+              }
+              break;
+              
+            case 'ArrowDown':
+              e.preventDefault();
+              if (currentFocusIndex < totalTx - 1) {
+                updateFocus(currentFocusIndex + 1);
+              }
+              break;
+              
+            case 'Enter':
+              e.preventDefault();
+              const selectedTxHash = pendingTxHashes[currentFocusIndex];
+              if (selectedTxHash) {
+                // Keep the selection when showing details
+                const selectedRow = document.querySelector(`[data-tx-hash="${selectedTxHash}"]`);
+                if (selectedRow) {
+                  // Ensure the row stays selected
+                  document.querySelectorAll('#tx-table > div:not(:first-child)').forEach(row => {
+                    row.classList.remove('bg-gray-700', 'selected-tx');
+                  });
+                  selectedRow.classList.add('bg-gray-700', 'selected-tx');
+                }
+                showTxDetails(selectedTxHash);
+                
+                // Focus the command input for immediate command entry
+                if (self.commandInput) {
+                  self.commandInput.focus();
+                }
+              }
+              break;
+              
+            case ':':
+              e.preventDefault();
+              // Focus the command input when colon is pressed
+              if (self.commandInput) {
+                self.commandInput.focus();
+                // Prepopulate with colon
+                self.commandInput.value = ':';
+                // Set cursor position after the colon
+                self.commandInput.setSelectionRange(1, 1);
+              }
+              break;
+              
+            case 'Escape':
+              e.preventDefault();
+              const existingDetails = document.querySelector('.tx-details');
+              if (existingDetails) {
+                existingDetails.remove();
+              }
+              break;
+          }
+        });
+
+        // Set initial focus and selection
+        setTimeout(() => {
+          container.focus();
+          updateFocus(0);
+        }, 0);
+
+        // Add Escape key handler for command input to return focus to the transaction table
+        self.commandInput.addEventListener('keydown', (e: KeyboardEvent) => {
+          if (e.key === 'Escape') {
+            e.preventDefault();
+            // Clear any input
+            self.commandInput.value = '';
+            // Return focus to the container
+            container.focus();
+          }
+        });
+
+        // Function to show transaction details
+        const showTxDetails = (txHash: string) => {
+          // Check if details for this transaction are already open
+          const existingDetails = document.querySelector('.tx-details');
+          const clickedRow = document.querySelector(`[data-tx-hash="${txHash}"]`);
+          
+          // If details exist and belong to the clicked row, close them (toggle off)
+          if (existingDetails && clickedRow && existingDetails.previousElementSibling === clickedRow) {
+            existingDetails.remove();
+            return;
+          }
+          
+          // Remove any existing details row
+          if (existingDetails) {
+            existingDetails.remove();
+          }
+
+          const txDetails = txDetailsMap.get(txHash);
+          const row = document.querySelector(`[data-tx-hash="${txHash}"]`);
+          
+          if (row && txDetails) {
+            // Ensure the row stays selected when showing details
+            document.querySelectorAll('#tx-table > div:not(:first-child)').forEach(r => {
+              r.classList.remove('bg-gray-700', 'selected-tx');
+            });
+            row.classList.add('bg-gray-700', 'selected-tx');
+            
+            const detailsRow = document.createElement('div');
+            detailsRow.className = 'px-4 py-3 bg-gray-900/50 tx-details';
+            detailsRow.innerHTML = `
+              <div class="space-y-2 text-xs">
+                <div class="grid grid-cols-2 gap-4">
+                  <div>
+                    <span class="text-gray-400">Full Hash:</span>
+                    <span class="text-gray-300 font-mono break-all">${txHash}</span>
+                  </div>
+                  <div>
+                    <span class="text-gray-400">Full To:</span>
+                    <span class="text-gray-300 font-mono break-all">${txDetails.to}</span>
+                  </div>
+                </div>
+                ${txDetails.data !== '0x' ? `
+                  <div>
+                    <span class="text-gray-400">Data:</span>
+                    <span class="text-gray-300 font-mono break-all">${txDetails.data}</span>
+                  </div>
+                ` : ''}
+                <div>
+                  <span class="text-gray-400">Signatures:</span>
+                  <div class="pl-4 space-y-1">
+                    ${txDetails.signatures.map((sig: string) => 
+                      `<span class="text-gray-300 font-mono break-all">${sig}</span>`
+                    ).join('<br>')}
+                  </div>
+                </div>
+              </div>
+            `;
+            
+            row.parentNode?.insertBefore(detailsRow, row.nextElementSibling);
+          }
+        };
+
+      } catch (error) {
+        console.error('Failed to fetch pending transactions:', error);
+        this.buffer.innerHTML = '';
+        const errorMsg = document.createElement('p');
+        errorMsg.textContent = `Error: ${error instanceof Error ? error.message : 'Unknown error'}`;
+        errorMsg.className = 'text-red-500';
+        this.buffer.appendChild(errorMsg);
+      }
     } else if (this.command === ':t') {
       if (this.mode !== 'TX') {
         this.buffer.textContent = 'Please switch to TX mode first by pressing "e" key';
@@ -888,23 +1297,6 @@ class VimApp {
         return;
       }
       this.showTransactionScreen();
-    } else if (this.command === ':p') {
-      if (this.mode !== 'TX') {
-        this.buffer.textContent = 'Please switch to TX mode first by pressing "e" key';
-        this.buffer.className = 'flex-1 p-4 overflow-y-auto text-yellow-400';
-        return;
-      }
-      if (!this.safeAddress) {
-        this.buffer.textContent = 'Please connect a Safe address with :c first';
-        this.buffer.className = 'flex-1 p-4 overflow-y-auto text-yellow-400';
-        return;
-      }
-      if (!this.signerAddress) {
-        this.buffer.textContent = 'Please connect wallet with :wc first';
-        this.buffer.className = 'flex-1 p-4 overflow-y-auto text-yellow-400';
-        return;
-      }
-      await this.prepareAndSignTransaction();
     } else if (this.command === ':dc') {
       if (!this.signerAddress) {
         this.buffer.textContent = 'No wallet connected to disconnect';
@@ -932,10 +1324,345 @@ class VimApp {
         this.buffer.className = 'flex-1 p-4 overflow-y-auto text-yellow-400';
         return;
       }
-      // We need a safeTxHash parameter here
-      this.buffer.textContent = 'Please provide a transaction hash to sign';
+
+      // Use the stored transaction hash instead of looking for selected element
+      if (!this.selectedTxHash) {
+        this.buffer.textContent = 'Please select a transaction to sign using ↑/↓ keys';
       this.buffer.className = 'flex-1 p-4 overflow-y-auto text-yellow-400';
       return;
+      }
+
+      try {
+        // Get contract address for the current network
+        const contractAddresses = getContractAddress(this.selectedNetwork);
+        
+        // First convert the hash to proper hex if it isn't already
+        const hashHex = this.selectedTxHash.startsWith('0x') ? this.selectedTxHash : `0x${this.selectedTxHash}`;
+        
+        // Then ensure it's padded to 32 bytes
+        const formattedHash = ethers.zeroPadValue(hashHex, 32);
+
+        // Get transaction details from the selected transaction
+        const safeTxPool = new SafeTxPool(contractAddresses.safeTxPool, this.selectedNetwork);
+        const txDetails = await safeTxPool.getTransactionDetails(this.selectedTxHash);
+
+        // Prepare transaction data for signing
+        const localTxData = {
+          to: txDetails.to,
+          value: txDetails.value,
+          data: txDetails.data
+        };
+
+        // Convert value to hex if needed
+        const valueHex = localTxData.value.startsWith('0x') ? localTxData.value : `0x${BigInt(localTxData.value).toString(16)}`;
+        
+        // Ensure data is hex
+        const dataHex = localTxData.data.startsWith('0x') ? localTxData.data : `0x${localTxData.data}`;
+
+        // Get nonce from Safe contract
+        const nonce = await this.getSafeNonce(this.safeAddress);
+
+        // Step 1: Request signature from user
+        const signRequest = {
+          topic: this.sessionTopic,
+          chainId: `eip155:${this.selectedNetwork.chainId}`,
+          request: {
+            id: Math.floor(Math.random() * 1000000),
+            jsonrpc: '2.0',
+            method: 'eth_signTypedData_v4',
+            params: [
+              this.signerAddress,
+              JSON.stringify({
+                domain: {
+                  name: 'Safe Transaction',
+                  version: '1.0',
+                  chainId: this.selectedNetwork.chainId,
+                  verifyingContract: this.safeAddress
+                },
+                primaryType: 'SafeTransaction',
+                types: {
+                  EIP712Domain: [
+                    { name: 'name', type: 'string' },
+                    { name: 'version', type: 'string' },
+                    { name: 'chainId', type: 'uint256' },
+                    { name: 'verifyingContract', type: 'address' }
+                  ],
+                  SafeTransaction: [
+                    { name: 'to', type: 'address' },
+                    { name: 'value', type: 'uint256' },
+                    { name: 'data', type: 'bytes' },
+                    { name: 'operation', type: 'uint8' },
+                    { name: 'safeTxGas', type: 'uint256' },
+                    { name: 'baseGas', type: 'uint256' },
+                    { name: 'gasPrice', type: 'uint256' },
+                    { name: 'gasToken', type: 'address' },
+                    { name: 'refundReceiver', type: 'address' },
+                    { name: 'nonce', type: 'uint256' },
+                    { name: 'safeTxHash', type: 'bytes32' }
+                  ]
+                },
+                message: {
+                  to: localTxData.to,
+                  value: valueHex,
+                  data: dataHex,
+                  operation: '0',
+                  safeTxGas: '0',
+                  baseGas: '0',
+                  gasPrice: '0',
+                  gasToken: '0x0000000000000000000000000000000000000000',
+                  refundReceiver: '0x0000000000000000000000000000000000000000',
+                  nonce: nonce.toString(),
+                  safeTxHash: formattedHash
+                }
+              })
+            ]
+          }
+        };
+
+        // Show signing confirmation UI for the first step
+        this.buffer.innerHTML = '';
+        const confirmationMsg = document.createElement('div');
+        confirmationMsg.className = 'max-w-2xl mx-auto bg-blue-900/50 p-6 rounded-lg border border-blue-700 shadow-lg';
+        confirmationMsg.innerHTML = `
+          <div class="flex items-center gap-3 mb-4">
+            <svg class="w-6 h-6 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
+            <h3 class="text-lg font-semibold text-blue-100">Step 1: Sign the Safe Transaction</h3>
+          </div>
+          <div class="bg-blue-900/50 p-4 rounded-lg space-y-3">
+            <p class="text-blue-200 text-sm">Please review and sign the Safe transaction details in your wallet:</p>
+            <div class="space-y-2 font-mono text-sm">
+              <p class="flex justify-between">
+                <span class="text-blue-400">To:</span>
+                <span class="text-blue-200">${truncateAddress(localTxData.to)}</span>
+              </p>
+              <p class="flex justify-between">
+                <span class="text-blue-400">Value:</span>
+                <span class="text-blue-200">${ethers.formatEther(valueHex)} ETH</span>
+              </p>
+              <p class="flex justify-between">
+                <span class="text-blue-400">Data:</span>
+                <span class="text-blue-200">${dataHex === '0x' ? 'None' : truncateAddress(dataHex)}</span>
+              </p>
+              <p class="flex justify-between">
+                <span class="text-blue-400">Operation:</span>
+                <span class="text-blue-200">Call (0)</span>
+              </p>
+              <p class="flex justify-between">
+                <span class="text-blue-400">Nonce:</span>
+                <span class="text-blue-200">${nonce}</span>
+              </p>
+              <p class="flex justify-between">
+                <span class="text-blue-400">Safe Tx Hash:</span>
+                <span class="text-blue-200">${truncateAddress(this.selectedTxHash)}</span>
+              </p>
+              <p class="flex justify-between">
+                <span class="text-blue-400">Network:</span>
+                <span class="text-blue-200">${this.selectedNetwork.displayName}</span>
+              </p>
+            </div>
+          </div>
+        `;
+        this.buffer.appendChild(confirmationMsg);
+
+        // Request signature from user
+        console.log('Requesting signature for hash:', formattedHash);
+        const signature = await this.signClient.request(signRequest);
+        console.log('Received signature:', signature);
+
+        // Step 2: Call signTx with the received signature
+        // Create interface with the correct function signature
+        const iface = new ethers.Interface([
+          "function signTx(bytes32 txHash, bytes calldata signature) external",
+        ]);
+
+        // Encode the function call with both parameters
+        const encodedTxData = iface.encodeFunctionData("signTx", [formattedHash, signature]);
+
+        // Get current gas prices
+        // Use utility function to prepare transaction request
+        const request = await prepareTransactionRequest({
+          provider: this.provider,
+          signerAddress: this.signerAddress!,
+          sessionTopic: this.sessionTopic!,
+          selectedNetwork: this.selectedNetwork,
+          contractAddress: contractAddresses.safeTxPool,
+          encodedTxData,
+          requestId: Math.floor(Math.random() * 1000000)
+        });
+
+        // Get gas limit from the request for UI display
+        const gasLimitHex = request.request.params[0].gasLimit;
+        const displayGasLimit = parseInt(gasLimitHex, 16);
+        // Get max fee values from the request for display
+        const maxFeePerGasHex = request.request.params[0].maxFeePerGas;
+        const maxPriorityFeePerGasHex = request.request.params[0].maxPriorityFeePerGas;
+        const maxFeePerGas = maxFeePerGasHex ? ethers.formatUnits(parseInt(maxFeePerGasHex, 16), 'gwei') : '10';
+        const maxPriorityFeePerGas = maxPriorityFeePerGasHex ? ethers.formatUnits(parseInt(maxPriorityFeePerGasHex, 16), 'gwei') : '1';
+
+        // Show signing confirmation UI for the second step
+        this.buffer.innerHTML = '';
+        const step2Msg = document.createElement('div');
+        step2Msg.className = 'max-w-2xl mx-auto bg-blue-900/50 p-6 rounded-lg border border-blue-700 shadow-lg';
+        step2Msg.innerHTML = `
+          <div class="flex items-center gap-3 mb-4">
+            <svg class="w-6 h-6 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
+            <h3 class="text-lg font-semibold text-blue-100">Step 2: Submit Signature to Contract</h3>
+          </div>
+          <div class="bg-blue-900/50 p-4 rounded-lg space-y-3">
+            <p class="text-blue-200 text-sm">Please confirm the transaction to submit your signature:</p>
+            <div class="space-y-2 font-mono text-sm">
+              <p class="flex justify-between">
+                <span class="text-blue-400">Function:</span>
+                <span class="text-blue-200">signTx(bytes32, bytes)</span>
+              </p>
+              <p class="flex justify-between">
+                <span class="text-blue-400">Contract:</span>
+                <span class="text-blue-200">${truncateAddress(contractAddresses.safeTxPool)}</span>
+              </p>
+              <p class="flex justify-between">
+                <span class="text-blue-400">Transaction Hash:</span>
+                <span class="text-blue-200">${truncateAddress(this.selectedTxHash || '')}</span>
+              </p>
+              <p class="flex justify-between">
+                <span class="text-blue-400">Network:</span>
+                <span class="text-blue-200">${this.selectedNetwork.displayName}</span>
+              </p>
+              <p class="flex justify-between">
+                <span class="text-blue-400">Gas Limit:</span>
+                <span class="text-blue-200">${`0x${displayGasLimit.toString(16)}`}</span>
+              </p>
+              <p class="flex justify-between">
+                <span class="text-blue-400">Max Fee:</span>
+                <span class="text-blue-200">${maxFeePerGas} Gwei</span>
+              </p>
+              <p class="flex justify-between">
+                <span class="text-blue-400">Priority Fee:</span>
+                <span class="text-blue-200">${maxPriorityFeePerGas} Gwei</span>
+              </p>
+            </div>
+          </div>
+        `;
+        this.buffer.appendChild(step2Msg);
+
+        // Send the transaction
+        console.log('Sending transaction request:', request);
+        const txHash = await this.signClient.request(request);
+
+        // Show success message
+        this.buffer.innerHTML = '';
+        const successMsg = document.createElement('div');
+        successMsg.className = 'max-w-2xl mx-auto bg-green-900/50 p-6 rounded-lg border border-green-700 shadow-lg';
+        successMsg.innerHTML = `
+          <div class="flex items-center gap-3 mb-4">
+            <svg class="w-6 h-6 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+            </svg>
+            <h3 class="text-lg font-semibold text-green-100">Transaction Signed Successfully</h3>
+          </div>
+          <div class="bg-green-900/50 p-4 rounded-lg space-y-3">
+            <div class="font-mono text-sm">
+              <p class="text-green-400 mb-1">Transaction Hash:</p>
+              <p class="text-green-200 break-all">${txHash}</p>
+            </div>
+            <p class="text-green-200 text-sm mt-4">The transaction has been signed. Use :l to refresh the transaction list.</p>
+          </div>
+        `;
+        this.buffer.appendChild(successMsg);
+
+      } catch (error: unknown) {
+        console.error('Failed to sign transaction:', error);
+        
+        // Handle user rejection
+        if (error instanceof Error && 
+            (error.message.toLowerCase().includes('rejected') || 
+             error.message.toLowerCase().includes('user denied'))) {
+          this.buffer.innerHTML = '';
+          const rejectionMsg = document.createElement('div');
+          rejectionMsg.className = 'max-w-2xl mx-auto bg-yellow-900/50 p-6 rounded-lg border border-yellow-700 shadow-lg';
+          rejectionMsg.innerHTML = `
+            <div class="flex items-center gap-3 mb-4">
+              <svg class="w-6 h-6 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+              </svg>
+              <h3 class="text-lg font-semibold text-yellow-100">Signature Cancelled</h3>
+            </div>
+            <p class="text-yellow-100">You've cancelled the signing request.</p>
+          `;
+          this.buffer.appendChild(rejectionMsg);
+          return;
+        }
+        
+        // Handle session errors
+        if (error instanceof Error && 
+            (error.message.includes('session topic') || 
+             error.message.includes('No matching key') ||
+             error.message.includes('expired'))) {
+          this.sessionTopic = null;
+          this.signerAddress = null;
+          this.signerAddressDisplay.textContent = '';
+          
+          this.buffer.innerHTML = '';
+          const reconnectMsg = document.createElement('div');
+          reconnectMsg.className = 'max-w-2xl mx-auto bg-yellow-900/50 p-6 rounded-lg border border-yellow-700 shadow-lg';
+          reconnectMsg.innerHTML = `
+            <div class="flex items-center gap-3 mb-4">
+              <svg class="w-6 h-6 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+              </svg>
+              <h3 class="text-lg font-semibold text-yellow-100">Session Expired</h3>
+            </div>
+            <p class="text-yellow-100 mb-4">Your wallet connection has expired.</p>
+            <div class="bg-yellow-900/50 p-4 rounded-lg text-sm">
+              <p class="text-yellow-200 mb-2">Please reconnect your wallet:</p>
+              <ol class="list-decimal list-inside text-yellow-100 space-y-1">
+                <li>Use :wc command to reconnect your wallet</li>
+                <li>Try signing the transaction again</li>
+              </ol>
+            </div>
+          `;
+          this.buffer.appendChild(reconnectMsg);
+          return;
+        }
+        
+        // Handle other errors
+        this.buffer.innerHTML = '';
+        const errorMsg = document.createElement('div');
+        errorMsg.className = 'max-w-2xl mx-auto bg-red-900/50 p-6 rounded-lg border border-red-700 shadow-lg';
+        errorMsg.innerHTML = `
+          <div class="flex items-center gap-3 mb-4">
+            <svg class="w-6 h-6 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
+            <h3 class="text-lg font-semibold text-red-100">Signing Failed</h3>
+          </div>
+          <p class="text-red-100 mb-4">An error occurred while signing the transaction:</p>
+          <div class="bg-red-900/50 p-4 rounded-lg">
+            <p class="text-red-200 font-mono text-sm break-all">${error instanceof Error ? error.message : 'Unknown error'}</p>
+          </div>
+        `;
+        this.buffer.appendChild(errorMsg);
+      }
+    } else if (this.command === ':p') {
+      if (this.mode !== 'TX') {
+        this.buffer.textContent = 'Please switch to TX mode first by pressing "e" key';
+        this.buffer.className = 'flex-1 p-4 overflow-y-auto text-yellow-400';
+        return;
+      }
+      if (!this.safeAddress) {
+        this.buffer.textContent = 'Please connect a Safe address with :c first';
+        this.buffer.className = 'flex-1 p-4 overflow-y-auto text-yellow-400';
+        return;
+      }
+      if (!this.signerAddress) {
+        this.buffer.textContent = 'Please connect wallet with :wc first';
+        this.buffer.className = 'flex-1 p-4 overflow-y-auto text-yellow-400';
+        return;
+      }
+      await this.proposeToSafeTxPool();
     } else {
       this.buffer.textContent = `Unknown command: ${this.command}`;
       this.buffer.className = 'flex-1 p-4 overflow-y-auto text-yellow-400';
@@ -1007,10 +1734,10 @@ class VimApp {
         // Create input for address entry with custom dropdown
         input = document.createElement('input');
         input.type = 'text';
-        input.id = field.id;
+      input.id = field.id;
         input.className = 'block w-full rounded-md border-0 py-1.5 text-white shadow-sm ring-1 ring-inset ring-gray-700 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-blue-600 sm:text-sm sm:leading-6 bg-gray-700';
-        input.placeholder = field.placeholder;
-        if (field.required) input.required = true;
+      input.placeholder = field.placeholder;
+      if (field.required) input.required = true;
 
         // Create custom dropdown container
         const dropdownContainer = document.createElement('div');
@@ -1070,7 +1797,7 @@ class VimApp {
               const nextIndex = currentIndex < options.length - 1 ? currentIndex + 1 : 0;
               options[currentIndex]?.classList.remove('bg-gray-700');
               options[nextIndex]?.classList.add('bg-gray-700');
-            } else {
+              } else {
               const prevIndex = currentIndex > 0 ? currentIndex - 1 : options.length - 1;
               options[currentIndex]?.classList.remove('bg-gray-700');
               options[prevIndex]?.classList.add('bg-gray-700');
@@ -1098,7 +1825,7 @@ class VimApp {
         fieldContainer.appendChild(inputWrapper);
         form.appendChild(fieldContainer);
         return;
-              } else {
+          } else {
         input = document.createElement('input');
         input.type = field.type;
         input.className = 'w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent';
@@ -1141,7 +1868,7 @@ class VimApp {
     // Add helper text
     const helperText = document.createElement('p');
     helperText.className = 'mt-6 text-sm text-gray-400';
-    helperText.textContent = 'Fill in the transaction details and use :p command to prepare and sign the transaction.';
+    helperText.textContent = 'Fill in the transaction details and use :p command to propose the transaction.';
     form.appendChild(helperText);
 
     // Assemble the form
@@ -1155,405 +1882,738 @@ class VimApp {
     }, 100);
   }
 
-  private async calculateSafeTxHash(
+  private async getSafeNonce(safeAddress: string): Promise<string> {
+    // Safe contract ABI for nonce function
+    const safeAbi = [
+      "function nonce() view returns (uint256)"
+    ];
+    
+    // Create contract instance
+    const safeContract = new ethers.Contract(safeAddress, safeAbi, this.provider);
+    
+    try {
+      // Get nonce from contract
+      const nonce = await safeContract.nonce();
+      return nonce.toString();
+    } catch (error) {
+      console.error('Error getting Safe nonce:', error);
+      throw new Error('Failed to get Safe nonce');
+    }
+  }
+
+  private async getSafeTxHashFromContract(
     to: string,
     value: string,
     data: string,
     operation: number,
     nonce: string,
-    chainId: number,
     safeAddress: string
   ): Promise<string> {
-    // Ensure data is properly formatted
-    const formattedData = data ? (data.startsWith('0x') ? data : `0x${data}`) : '0x';
+    // Safe contract ABI for getTransactionHash function
+    const safeAbi = [
+      "function getTransactionHash(address to, uint256 value, bytes data, uint8 operation, uint256 safeTxGas, uint256 baseGas, uint256 gasPrice, address gasToken, address refundReceiver, uint256 nonce) view returns (bytes32)"
+    ];
     
-    // Ensure value is properly formatted
-    const formattedValue = value ? 
-      (value.startsWith('0x') ? value : ethers.parseEther(value).toString()) : 
-      '0x0';
-
-    return calculateSafeTxHash(
-      {
+    // Create contract instance
+    const safeContract = new ethers.Contract(safeAddress, safeAbi, this.provider);
+    
+    try {
+      // Get hash from contract
+      const hash = await safeContract.getTransactionHash(
         to,
-        value: formattedValue,
-        data: formattedData,
+        value,
+        data,
         operation,
+        '0', // safeTxGas
+        '0', // baseGas
+        '0', // gasPrice
+        '0x0000000000000000000000000000000000000000', // gasToken
+        '0x0000000000000000000000000000000000000000', // refundReceiver
         nonce
-      },
-      safeAddress,
-      chainId
-    );
+      );
+      return hash;
+    } catch (error) {
+      console.error('Error getting Safe transaction hash:', error);
+      throw new Error('Failed to get Safe transaction hash');
+    }
   }
 
-  private async prepareAndSignTransaction() {
-    if (!this.safeAddress || !this.cachedSafeInfo) {
-      this.buffer.innerHTML = '';
-      const errorMsg = document.createElement('p');
-      errorMsg.textContent = 'Error: No Safe connected. Use :c to connect to a Safe first.';
-      errorMsg.className = 'text-red-500';
-      this.buffer.appendChild(errorMsg);
-      return;
-    }
-
-    if (!this.txFormData || !this.txFormData.to) {
-      this.buffer.innerHTML = '';
-      const errorMsg = document.createElement('p');
-      errorMsg.textContent = 'No transaction data found. Please create a transaction with :t first.';
-      errorMsg.className = 'text-red-500';
-      this.buffer.appendChild(errorMsg);
-      return;
-    }
+  private async proposeToSafeTxPool(): Promise<void> {
+    if (this._isProposing || !this.txFormData) return;
+    this._isProposing = true;
 
     try {
-      // Validate transaction data
-      if (!ethers.isAddress(this.txFormData.to)) {
+      // Validate requirements
+      if (!this.txFormData || !this.txFormData.to) {
         this.buffer.innerHTML = '';
         const errorMsg = document.createElement('p');
-        errorMsg.textContent = 'Error: Invalid destination address';
+        errorMsg.textContent = 'No transaction data found. Please create a transaction with :t first.';
         errorMsg.className = 'text-red-500';
         this.buffer.appendChild(errorMsg);
         return;
       }
 
-      // Convert value to hex if it's not already
-      const valueHex = this.txFormData.value ? 
-        (this.txFormData.value.startsWith('0x') ? 
-          this.txFormData.value : 
-          `0x${ethers.parseEther(this.txFormData.value).toString(16)}`) : 
-        '0x0';
-      
-      // Ensure data is hex
-      const dataHex = this.txFormData.data ? 
-        (this.txFormData.data.startsWith('0x') ? 
-          this.txFormData.data : 
-          `0x${this.txFormData.data}`) : 
-        '0x';
-
-      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
-
-      // Prepare transaction on backend
-      const response = await fetch(`${apiUrl}/safe/prepare-transaction`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          safeAddress: this.safeAddress,
-          transaction: {
-            to: this.txFormData.to,
-            value: valueHex,
-            data: dataHex,
-            operation: 0
-          },
-          network: this.selectedNetwork.name
-        }),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.message || 'Failed to prepare transaction');
-      }
-
-      const result = await response.json();
-      console.log('Received prepared transaction:', result);
-
-      // Clear buffer and show signing request
+      if (!this.safeAddress || !this.cachedSafeInfo) {
       this.buffer.innerHTML = '';
-      const signingContainer = document.createElement('div');
-      signingContainer.className = 'max-w-2xl mx-auto bg-gray-800 p-6 rounded-lg border border-gray-700 shadow-lg space-y-4';
-      
-      const signingTitle = document.createElement('h3');
-      signingTitle.className = 'text-xl font-bold text-white mb-4';
-      signingTitle.textContent = 'Sign Transaction';
-      signingContainer.appendChild(signingTitle);
-
-      // Add transaction details
-      const detailsBox = document.createElement('div');
-      detailsBox.className = 'bg-gray-700 p-4 rounded-lg';
-      
-      const detailsTitle = document.createElement('h4');
-      detailsTitle.className = 'text-gray-300 font-medium mb-2';
-      detailsTitle.textContent = 'Transaction Details';
-      detailsBox.appendChild(detailsTitle);
-
-      const detailsList = document.createElement('ul');
-      detailsList.className = 'space-y-2 text-sm';
-      
-      // Add To address
-      const toItem = document.createElement('li');
-      toItem.className = 'flex justify-between items-center';
-      toItem.innerHTML = `
-        <span class="text-gray-400">To:</span>
-        <span class="font-mono text-gray-300">${this.txFormData.to}</span>
-      `;
-      detailsList.appendChild(toItem);
-
-      // Add Value with both ETH and hex format
-      const valueItem = document.createElement('li');
-      valueItem.className = 'flex justify-between items-start';
-      valueItem.innerHTML = `
-        <span class="text-gray-400">Value:</span>
-        <div class="text-right">
-          <div class="font-mono text-gray-300">${this.txFormData.value || '0'} ETH</div>
-          <div class="font-mono text-xs text-gray-500">${valueHex}</div>
-        </div>
-      `;
-      detailsList.appendChild(valueItem);
-
-      // Add Operation
-      const operationItem = document.createElement('li');
-      operationItem.className = 'flex justify-between items-center';
-      operationItem.innerHTML = `
-        <span class="text-gray-400">Operation:</span>
-        <span class="font-mono text-gray-300">${result.typedData.message.operation === 0 ? '0 - Call' : '1 - DelegateCall'}</span>
-      `;
-      detailsList.appendChild(operationItem);
-
-      // Add Nonce
-      const nonceItem = document.createElement('li');
-      nonceItem.className = 'flex justify-between items-center';
-      nonceItem.innerHTML = `
-        <span class="text-gray-400">Nonce:</span>
-        <span class="font-mono text-gray-300">${result.typedData.message.nonce}</span>
-      `;
-      detailsList.appendChild(nonceItem);
-
-      // Add Data
-      const dataItem = document.createElement('li');
-      dataItem.className = 'flex justify-between items-center';
-      dataItem.innerHTML = `
-        <span class="text-gray-400">Data:</span>
-        <span class="font-mono text-gray-300">${this.txFormData.data || '0x'}</span>
-      `;
-      detailsList.appendChild(dataItem);
-
-      detailsBox.appendChild(detailsList);
-      signingContainer.appendChild(detailsBox);
-
-      // Add domain hash
-      const domainHash = ethers.TypedDataEncoder.hashDomain({
-        verifyingContract: result.typedData.domain.verifyingContract,
-        chainId: result.typedData.domain.chainId
-      });
-
-      // Calculate message hash
-      const messageHash = ethers.TypedDataEncoder.from({
-        SafeTx: [
-          { name: 'to', type: 'address' },
-          { name: 'value', type: 'uint256' },
-          { name: 'data', type: 'bytes' },
-          { name: 'operation', type: 'uint8' },
-          { name: 'safeTxGas', type: 'uint256' },
-          { name: 'baseGas', type: 'uint256' },
-          { name: 'gasPrice', type: 'uint256' },
-          { name: 'gasToken', type: 'address' },
-          { name: 'refundReceiver', type: 'address' },
-          { name: 'nonce', type: 'uint256' }
-        ]
-      }).hash(result.typedData.message);
-
-      // Calculate local Safe transaction hash
-      const calculatedHash = await this.calculateSafeTxHash(
-        this.txFormData.to,
-        this.txFormData.value,
-        this.txFormData.data,
-        0,
-        result.typedData.message.nonce,
-        this.selectedNetwork.chainId,
-        this.safeAddress
-      );
-      
-      // Create hash summary container
-      const hashSummaryBox = document.createElement('div');
-      hashSummaryBox.className = 'bg-gray-700 p-4 rounded-lg mt-4';
-      
-      const hashSummaryTitle = document.createElement('h4');
-      hashSummaryTitle.className = 'text-gray-300 font-medium mb-2';
-      hashSummaryTitle.textContent = 'Transaction Hashes';
-
-      const hashSummaryList = document.createElement('div');
-      hashSummaryList.className = 'space-y-4';
-
-      // Display full hashes
-      const hashes = [
-        { label: 'Domain Hash', value: domainHash },
-        { label: 'Message Hash', value: messageHash },
-        { label: 'Safe Transaction Hash (Backend)', value: result.safeTxHash },
-        { label: 'Safe Transaction Hash (Calculated)', value: calculatedHash }
-      ];
-
-      hashes.forEach(({ label, value }) => {
-        const hashItem = document.createElement('div');
-        hashItem.className = 'bg-gray-800 p-3 rounded border border-gray-600';
-        
-        const labelDiv = document.createElement('div');
-        labelDiv.className = 'text-gray-400 text-sm mb-1';
-        labelDiv.textContent = label;
-        
-        const valueDiv = document.createElement('div');
-        valueDiv.className = 'font-mono text-sm text-gray-300 break-all';
-        valueDiv.textContent = value;
-        
-        hashItem.appendChild(labelDiv);
-        hashItem.appendChild(valueDiv);
-        hashSummaryList.appendChild(hashItem);
-      });
-
-      // Add verification status
-      const hashesMatch = calculatedHash === result.safeTxHash;
-      const verificationStatus = document.createElement('div');
-      verificationStatus.className = `text-sm ${hashesMatch ? 'text-green-400' : 'text-red-400'} mt-4`;
-      verificationStatus.textContent = hashesMatch ? '✓ Hash verification successful' : '✗ Hash verification failed';
-      
-      hashSummaryBox.appendChild(hashSummaryTitle);
-      hashSummaryBox.appendChild(hashSummaryList);
-      hashSummaryBox.appendChild(verificationStatus);
-      signingContainer.appendChild(hashSummaryBox);
-
-      const signingMsg = document.createElement('p');
-      signingMsg.textContent = 'Please sign the transaction in your wallet...';
-      signingMsg.className = 'text-blue-400 text-lg font-medium mt-4';
-      signingContainer.appendChild(signingMsg);
-
-      this.buffer.appendChild(signingContainer);
-
-      // Request signature using the typed data from backend
-      const signature = await this.signMessage(JSON.stringify(result.typedData));
-      if (!signature) {
+        const errorMsg = document.createElement('p');
+        errorMsg.textContent = 'Error: No Safe connected. Use :c to connect to a Safe first.';
+        errorMsg.className = 'text-red-500';
+        this.buffer.appendChild(errorMsg);
         return;
       }
 
-      // Send signature to backend
-      const signResponse = await fetch(`${apiUrl}/safe/send-transaction`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          safeAddress: this.safeAddress,
-          to: this.txFormData.to,
+      if (!this.signClient || !this.sessionTopic || !this.signerAddress) {
+      this.buffer.innerHTML = '';
+      const errorMsg = document.createElement('p');
+        errorMsg.textContent = 'Error: No wallet connected. Use :wc to connect a wallet first.';
+      errorMsg.className = 'text-red-500';
+      this.buffer.appendChild(errorMsg);
+        return;
+      }
+
+      // Verify session is still valid
+      try {
+        const session = await this.signClient.session.get(this.sessionTopic);
+        if (!session || session.expiry * 1000 <= Date.now()) {
+          throw new Error('Session expired');
+        }
+      } catch (error) {
+        this.sessionTopic = null;
+        this.signerAddress = null;
+        this.signerAddressDisplay.textContent = '';
+        throw new Error('Invalid or expired session');
+      }
+
+      // Store tx data locally
+      const localTxData = {
+        to: this.txFormData.to,
+        value: this.txFormData.value || '0',
+        data: this.txFormData.data || '0x'
+      };
+
+      // Get contract address and prepare basic data
+      const contractAddresses = getContractAddress(this.selectedNetwork);
+      const nonce = await this.getSafeNonce(this.safeAddress);
+      
+      // Convert value to hex
+      const valueHex = localTxData.value.startsWith('0x') ? 
+        localTxData.value : 
+        `0x${ethers.parseEther(localTxData.value).toString(16)}`;
+      
+      // Ensure data is hex
+      const dataHex = localTxData.data.startsWith('0x') ? localTxData.data : `0x${localTxData.data}`;
+
+      // Get hash from Safe contract
+      const safeTxHash = await this.getSafeTxHashFromContract(
+        localTxData.to,
+        valueHex,
+        dataHex,
+        0,
+        nonce,
+        this.safeAddress
+      );
+
+      // Encode function data for the transaction to display in UI
+      const iface = new ethers.Interface([
+        "function proposeTx(bytes32 safeTxHash, address safe, address to, uint256 value, bytes data, uint8 operation, uint256 nonce) external returns (bool)"
+      ]);
+
+      const encodedTxData = iface.encodeFunctionData("proposeTx", [
+        safeTxHash,
+        this.safeAddress,
+        localTxData.to,
+        BigInt(valueHex),
+        dataHex,
+        0,
+        BigInt(nonce)
+      ]);
+
+      // Decode the transaction data for display
+      const decodedData = iface.parseTransaction({ data: encodedTxData });
+      if (!decodedData) {
+        throw new Error('Failed to decode transaction data');
+      }
+      const functionName = decodedData.name;
+      const args = decodedData.args;
+
+      // Calculate our hash for comparison
+      const calculatedHash = await calculateSafeTxHash(
+        {
+          to: localTxData.to,
           value: valueHex,
           data: dataHex,
           operation: 0,
-          network: this.selectedNetwork.name,
-          signature
-        }),
+          nonce
+        },
+        this.safeAddress,
+        this.selectedNetwork.chainId
+      );
+
+      const hashVerification = safeTxHash === calculatedHash;
+
+      // Create a more detailed transaction summary
+      const detailedSummary = document.createElement('div');
+      detailedSummary.className = 'max-w-2xl mx-auto bg-gray-800 p-6 rounded-lg border border-gray-700 shadow-lg mb-4';
+      detailedSummary.innerHTML = `
+        <h3 class="text-xl font-bold text-white mb-4">Transaction Details</h3>
+        <div class="space-y-4">
+          <div class="bg-gray-900 p-4 rounded-lg">
+            <h4 class="text-sm font-medium text-gray-400 mb-2">Function Call</h4>
+            <p class="font-mono text-sm text-blue-400">${functionName}</p>
+          </div>
+          
+          <div class="bg-gray-900 p-4 rounded-lg">
+            <h4 class="text-sm font-medium text-gray-400 mb-2">Arguments</h4>
+            <div class="space-y-2 font-mono text-sm">
+              <div class="grid grid-cols-3 gap-2">
+                <span class="text-gray-500">Safe Tx Hash:</span>
+                <span class="text-gray-300 col-span-2 break-all">${args[0]}</span>
+              </div>
+              <div class="grid grid-cols-3 gap-2">
+                <span class="text-gray-500">Safe:</span>
+                <span class="text-gray-300 col-span-2 break-all">${args[1]}</span>
+              </div>
+              <div class="grid grid-cols-3 gap-2">
+                <span class="text-gray-500">To:</span>
+                <span class="text-gray-300 col-span-2 break-all">${args[2]}</span>
+              </div>
+              <div class="grid grid-cols-3 gap-2">
+                <span class="text-gray-500">Value:</span>
+                <span class="text-gray-300 col-span-2">${ethers.formatEther(args[3])} ETH</span>
+              </div>
+              <div class="grid grid-cols-3 gap-2">
+                <span class="text-gray-500">Data:</span>
+                <span class="text-gray-300 col-span-2 break-all">${args[4]}</span>
+              </div>
+              <div class="grid grid-cols-3 gap-2">
+                <span class="text-gray-500">Operation:</span>
+                <span class="text-gray-300 col-span-2">${args[5]} (Call)</span>
+              </div>
+              <div class="grid grid-cols-3 gap-2">
+                <span class="text-gray-500">Nonce:</span>
+                <span class="text-gray-300 col-span-2">${args[6]}</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="bg-gray-900 p-4 rounded-lg">
+            <h4 class="text-sm font-medium text-gray-400 mb-2">Hash Verification</h4>
+            <div class="flex items-center gap-2">
+              <span class="${hashVerification ? 'text-green-400' : 'text-red-400'} font-medium">
+                ${hashVerification ? '✓ Verified' : '✗ Invalid'}
+              </span>
+              <span class="text-gray-400 text-sm">
+                ${hashVerification ? 
+                  'Safe transaction hash matches the calculated hash' : 
+                  'Warning: Safe transaction hash does not match the calculated hash'}
+              </span>
+            </div>
+          </div>
+
+          <div class="bg-gray-900 p-4 rounded-lg">
+            <h4 class="text-sm font-medium text-gray-400 mb-2">Raw Transaction Data</h4>
+            <p class="font-mono text-xs text-gray-300 break-all">${encodedTxData}</p>
+          </div>
+        </div>
+      `;
+
+      // Clear previous content and show the detailed summary
+      this.buffer.innerHTML = '';
+      this.buffer.appendChild(detailedSummary);
+
+      // If hash verification fails, show warning and return
+      if (!hashVerification) {
+        const warningMsg = document.createElement('div');
+        warningMsg.className = 'max-w-2xl mx-auto mt-4 bg-red-900/50 p-4 rounded-lg text-red-200';
+        warningMsg.innerHTML = `
+          <div class="flex items-center gap-2">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+            </svg>
+            <span class="font-medium">Transaction cannot proceed due to hash mismatch</span>
+          </div>
+          <p class="mt-2 text-sm">Please verify the transaction parameters and try again.</p>
+        `;
+        this.buffer.appendChild(warningMsg);
+        return;
+      }
+
+      // Prepare transaction request
+      const request = await prepareTransactionRequest({
+        provider: this.provider,
+        signerAddress: this.signerAddress!,
+        sessionTopic: this.sessionTopic!,
+        selectedNetwork: this.selectedNetwork,
+        contractAddress: contractAddresses.safeTxPool,
+        encodedTxData,
+        requestId: Math.floor(Math.random() * 1000000)
       });
 
-      if (!signResponse.ok) {
-        throw new Error('Failed to send transaction');
+      // Add transaction summary to the UI before sending
+      const txSummary = document.createElement('div');
+      txSummary.className = 'max-w-2xl mx-auto mt-4 bg-blue-900/50 p-6 rounded-lg border border-blue-700 shadow-lg';
+      txSummary.innerHTML = `
+        <div class="flex items-center gap-3 mb-4">
+          <svg class="w-6 h-6 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+          </svg>
+          <h3 class="text-lg font-semibold text-blue-100">Waiting for Wallet Confirmation</h3>
+        </div>
+        <div class="bg-blue-900/50 p-4 rounded-lg space-y-3">
+          <p class="text-blue-200 text-sm">Please confirm the transaction in your wallet. You will be proposing:</p>
+          <div class="space-y-2 font-mono text-sm">
+            <p class="flex justify-between">
+              <span class="text-blue-400">Function:</span>
+              <span class="text-blue-200">proposeTx()</span>
+            </p>
+            <p class="flex justify-between">
+              <span class="text-blue-400">Contract:</span>
+              <span class="text-blue-200">${truncateAddress(contractAddresses.safeTxPool)}</span>
+            </p>
+            <p class="flex justify-between">
+              <span class="text-blue-400">Safe:</span>
+              <span class="text-blue-200">${truncateAddress(this.safeAddress)}</span>
+            </p>
+            <p class="flex justify-between">
+              <span class="text-blue-400">To:</span>
+              <span class="text-blue-200">${truncateAddress(localTxData.to)}</span>
+            </p>
+            <p class="flex justify-between">
+              <span class="text-blue-400">Value:</span>
+              <span class="text-blue-200">${ethers.formatEther(valueHex)} ETH</span>
+            </p>
+            <p class="flex justify-between">
+              <span class="text-blue-400">Nonce:</span>
+              <span class="text-blue-200">${nonce}</span>
+            </p>
+            <p class="flex justify-between">
+              <span class="text-blue-400">Hash:</span>
+              <span class="text-blue-200">${truncateAddress(safeTxHash)}</span>
+            </p>
+          </div>
+        </div>
+      `;
+      this.buffer.appendChild(txSummary);
+
+      // Send the transaction with proper error handling
+      let txHash;
+      try {
+        // Send the request and wait for response
+        txHash = await this.signClient.request(request);
+        
+        if (!txHash || typeof txHash !== 'string') {
+          throw new Error('Invalid transaction hash received');
+        }
+      } catch (error: any) {
+        console.error('Transaction request failed:', error);
+        
+        // Handle user rejection
+        if (error?.message?.toLowerCase().includes('rejected') || 
+            error?.message?.toLowerCase().includes('user denied')) {
+          
+          // Show user-friendly rejection message
+          this.buffer.innerHTML = '';
+          const rejectionMsg = document.createElement('div');
+          rejectionMsg.className = 'max-w-2xl mx-auto bg-yellow-900/50 p-6 rounded-lg border border-yellow-700 shadow-lg';
+          rejectionMsg.innerHTML = `
+            <div class="flex items-center gap-3 mb-4">
+              <svg class="w-6 h-6 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+              </svg>
+              <h3 class="text-lg font-semibold text-yellow-100">Transaction Cancelled</h3>
+            </div>
+            <p class="text-yellow-100 mb-4">You've rejected the transaction from your wallet.</p>
+            <div class="bg-yellow-900/50 p-4 rounded-lg text-sm">
+              <p class="text-yellow-200 mb-2">What you can do next:</p>
+              <ul class="list-disc list-inside text-yellow-100 space-y-1">
+                <li>Review the transaction details and try again</li>
+                <li>Use :t to create a new transaction</li>
+                <li>Use :l to view pending transactions</li>
+              </ul>
+            </div>
+          `;
+          this.buffer.appendChild(rejectionMsg);
+          return;
+        }
+        
+        // Handle session errors
+        if (error?.message?.includes('session topic') || 
+            error?.message?.includes('No matching key') ||
+            error?.message?.includes('expired')) {
+          this.sessionTopic = null;
+          this.signerAddress = null;
+          this.signerAddressDisplay.textContent = '';
+          
+          this.buffer.innerHTML = '';
+          const reconnectMsg = document.createElement('div');
+          reconnectMsg.className = 'max-w-2xl mx-auto bg-yellow-900/50 p-6 rounded-lg border border-yellow-700 shadow-lg';
+          reconnectMsg.innerHTML = `
+            <div class="flex items-center gap-3 mb-4">
+              <svg class="w-6 h-6 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+              </svg>
+              <h3 class="text-lg font-semibold text-yellow-100">Session Expired</h3>
+            </div>
+            <p class="text-yellow-100 mb-4">Your wallet connection has expired.</p>
+            <div class="bg-yellow-900/50 p-4 rounded-lg text-sm">
+              <p class="text-yellow-200 mb-2">Please reconnect your wallet:</p>
+              <ol class="list-decimal list-inside text-yellow-100 space-y-1">
+                <li>Use :wc command to reconnect your wallet</li>
+                <li>Try proposing the transaction again</li>
+              </ol>
+            </div>
+          `;
+          this.buffer.appendChild(reconnectMsg);
+          return;
+        }
+        
+        // Handle other errors with improved UI
+      this.buffer.innerHTML = '';
+        const errorMsg = document.createElement('div');
+        errorMsg.className = 'max-w-2xl mx-auto bg-red-900/50 p-6 rounded-lg border border-red-700 shadow-lg';
+        errorMsg.innerHTML = `
+          <div class="flex items-center gap-3 mb-4">
+            <svg class="w-6 h-6 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
+            <h3 class="text-lg font-semibold text-red-100">Transaction Failed</h3>
+          </div>
+          <p class="text-red-100 mb-4">An error occurred while processing your transaction:</p>
+          <div class="bg-red-900/50 p-4 rounded-lg">
+            <p class="text-red-200 font-mono text-sm break-all">${error?.message || 'Unknown error'}</p>
+          </div>
+          <div class="mt-4 text-sm text-red-200">
+            Please verify your wallet connection and try again.
+          </div>
+        `;
+        this.buffer.appendChild(errorMsg);
+        return;
       }
 
-      const signResult = await signResponse.json();
-      console.log('Server response after signing:', signResult);
-      
-      // Verify transaction hashes match
-      if (signResult.safeTxHash !== result.safeTxHash) {
-        throw new Error('Transaction hash mismatch - security check failed');
-      }
-      
       // Show success message
       this.buffer.innerHTML = '';
-      const successMsg = document.createElement('p');
-      successMsg.textContent = 'Transaction signed successfully!';
-      successMsg.className = 'text-green-500';
+      const successMsg = document.createElement('div');
+      successMsg.className = 'bg-green-900 p-4 rounded-lg text-white';
+      successMsg.innerHTML = `
+        <h3 class="text-xl font-bold mb-2">Transaction Proposed Successfully</h3>
+        <div class="space-y-2">
+          <div class="font-mono text-sm bg-gray-800 p-2 rounded">
+            <p class="font-bold text-blue-400">Transaction Hash:</p>
+            <p class="break-all">${txHash}</p>
+          </div>
+        </div>
+        <p class="mt-4">The transaction has been proposed to the SafeTxPool contract. Other owners can now sign it.</p>
+      `;
       this.buffer.appendChild(successMsg);
 
-      // Clear form data
+      // Clear form data only after successful transaction
       this.txFormData = null;
+
+    } catch (error: unknown) {
+      console.error('Failed to propose transaction to SafeTxPool:', error);
       
-      // Focus command input
-      this.commandInput.focus();
-    } catch (error) {
-      console.error('Error preparing transaction:', error);
+      // Handle session errors
+      if (error instanceof Error && 
+          (error.message.includes('session topic') || 
+           error.message.includes('No matching key') ||
+           error.message.includes('expired'))) {
+        this.sessionTopic = null;
+        this.signerAddress = null;
+        this.signerAddressDisplay.textContent = '';
+        
+        this.buffer.innerHTML = '';
+        const reconnectMsg = document.createElement('p');
+        reconnectMsg.textContent = 'WalletConnect session expired. Please reconnect using :wc command.';
+        reconnectMsg.className = 'text-yellow-400';
+        this.buffer.appendChild(reconnectMsg);
+        return;
+      }
+      
       this.buffer.innerHTML = '';
       const errorMsg = document.createElement('p');
-      errorMsg.textContent = `Error: ${error instanceof Error ? error.message : 'Failed to prepare transaction'}`;
+      errorMsg.textContent = `Error: ${error instanceof Error ? error.message : 'Unknown error'}`;
       errorMsg.className = 'text-red-500';
       this.buffer.appendChild(errorMsg);
+    } finally {
+      this._isProposing = false;
     }
   }
 
-  private updateTitle() {
-    document.title = `Minimalist Safe{Wallet}`;
+  private clearSafeInfoCache(): void {
+    this.cachedSafeInfo = null;
   }
 
   private async loadAndCacheSafeInfo(): Promise<void> {
     if (!this.safeAddress) return;
 
     try {
-      // Clear any existing cache first to avoid stale data
-      this.cachedSafeInfo = null;
+      // Get Safe info from the contract
+      const safeContract = new ethers.Contract(
+        this.safeAddress,
+        [
+          "function getOwners() view returns (address[])",
+          "function getThreshold() view returns (uint256)",
+          "function getBalance() view returns (uint256)"
+        ],
+        this.provider
+      );
 
-      // First check if the Safe exists on the selected network by checking its code
-      const code = await this.provider.getCode(this.safeAddress);
-      if (code === '0x') {
-        throw new Error(`Safe does not exist on ${this.selectedNetwork.displayName}`);
-      }
+      const [owners, threshold, balance] = await Promise.all([
+        safeContract.getOwners(),
+        safeContract.getThreshold(),
+        this.provider.getBalance(this.safeAddress)
+      ]);
 
-      // Fetch balance using the current network's provider
-      const balance = await this.provider.getBalance(this.safeAddress);
-      const balanceInEth = ethers.formatEther(balance);
-
-      // Create a promise to handle the socket response
-      return new Promise((resolve, reject) => {
-        // Set up a timeout
-        const timeout = setTimeout(() => {
-          this.socket.off('safeInfo');
-          reject(new Error('Safe info request timed out'));
-        }, 10000);
-
-        // Emit getSafeInfo with network information
-        this.socket.emit('getSafeInfo', { 
-          safeAddress: this.safeAddress,
-          network: this.selectedNetwork.name,
-          chainId: this.selectedNetwork.chainId,
-          provider: this.selectedNetwork.provider // Add the provider URL to ensure backend uses correct network
-        });
-        
-        // One-time listener for the response
-        this.socket.once('safeInfo', async (data: { address: string; owners: string[]; threshold: number; chainId?: number }) => {
-          clearTimeout(timeout);
-          
-          try {
-            // If chainId is provided in the response, verify it matches the selected network
-            if (data.chainId !== undefined && data.chainId !== this.selectedNetwork.chainId) {
-              throw new Error(`Safe info is from a different network (Chain ID: ${data.chainId})`);
-            }
-
-            // Resolve ENS names for all owners using the current network's provider
+      // Resolve ENS names for owners
             const ensNames: { [address: string]: string | null } = {};
-            for (const owner of data.owners) {
+      for (const owner of owners) {
               ensNames[owner] = await this.resolveEnsName(owner);
             }
 
-            // Cache the data with network information
             this.cachedSafeInfo = {
-              owners: data.owners,
-              threshold: data.threshold,
-              balance: balanceInEth,
+        owners,
+        threshold: Number(threshold),
+        balance: balance.toString(),
               ensNames,
               network: this.selectedNetwork.name,
               chainId: this.selectedNetwork.chainId
             };
-
-            resolve();
           } catch (error) {
-            reject(error);
+      console.error('Error loading Safe info:', error);
+      throw error;
+    }
+  }
+
+  private displaySafeInfo(safeInfo: SafeInfo): void {
+    this.buffer.innerHTML = '';
+    const container = document.createElement('div');
+    container.className = 'max-w-2xl mx-auto bg-gray-800 p-6 rounded-lg border border-gray-700 shadow-lg space-y-4';
+
+    // Create title
+    const title = document.createElement('h3');
+    title.className = 'text-xl font-bold text-white mb-4';
+    title.textContent = 'Safe Information';
+    container.appendChild(title);
+
+    // Create info box
+    const infoBox = document.createElement('div');
+    infoBox.className = 'bg-gray-700 p-4 rounded-lg';
+    
+    const infoList = document.createElement('ul');
+    infoList.className = 'space-y-2 text-sm';
+
+    // Add Safe details
+    const details = [
+      { label: 'Safe Address', value: this.safeAddress || '' },
+      { label: 'Network', value: safeInfo.network },
+      { label: 'Balance', value: `${ethers.formatEther(safeInfo.balance)} ETH` },
+      { label: 'Threshold', value: `${safeInfo.threshold} out of ${safeInfo.owners.length} owner(s)` }
+    ];
+
+    details.forEach(({ label, value }) => {
+      const item = document.createElement('li');
+      item.className = 'flex justify-between items-start';
+      item.innerHTML = `
+        <span class="text-gray-400">${label}:</span>
+        <span class="text-gray-300 text-right">${value}</span>
+      `;
+      infoList.appendChild(item);
+    });
+
+    // Add owners section
+    const ownersTitle = document.createElement('li');
+    ownersTitle.className = 'text-gray-400 mt-4 mb-2';
+    ownersTitle.textContent = 'Owners:';
+    infoList.appendChild(ownersTitle);
+
+    safeInfo.owners.forEach((owner) => {
+      const ownerItem = document.createElement('li');
+      ownerItem.className = 'flex items-center space-x-2 pl-4';
+      const ensName = safeInfo.ensNames[owner];
+        ownerItem.innerHTML = `
+        <span class="text-gray-300 font-mono">
+          ${ensName ? `${ensName} (${truncateAddress(owner)})` : truncateAddress(owner)}
+        </span>
+      `;
+      infoList.appendChild(ownerItem);
+    });
+
+    infoBox.appendChild(infoList);
+    container.appendChild(infoBox);
+    this.buffer.appendChild(container);
+  }
+
+  private updateTitle(): void {
+    document.title = this.safeAddress ? 
+      `Safe ${truncateAddress(this.safeAddress)} - Minimalist Safe{Wallet}` : 
+      'Minimalist Safe{Wallet}';
+  }
+
+  private async initializeWalletConnect(chainId: number): Promise<void> {
+    try {
+      // If there's an active session, verify it's still valid
+      if (this.sessionTopic && this.signClient) {
+        try {
+          const session = await this.signClient.session.get(this.sessionTopic);
+          if (session && session.expiry * 1000 > Date.now()) {
+            // Session is still valid
+            this.buffer.innerHTML = '';
+            const msg = document.createElement('p');
+            msg.textContent = 'Already connected to wallet!';
+            msg.className = 'text-green-400';
+            this.buffer.appendChild(msg);
+            return;
+          }
+        } catch (e) {
+          // Session not found or expired, clear it
+          this.sessionTopic = null;
+          this.signerAddress = null;
+          this.signerAddressDisplay.textContent = '';
+        }
+      }
+
+      // Initialize WalletConnect SignClient if not already initialized
+      if (!this.signClient) {
+    this.signClient = await SignClient.init({
+          projectId: import.meta.env.VITE_WALLET_CONNECT_PROJECT_ID,
+      metadata: {
+        name: 'Minimalist Safe{Wallet}',
+            description: 'A minimalist interface for Safe{Wallet}',
+            url: window.location.origin,
+            icons: ['https://walletconnect.com/walletconnect-logo.svg']
           }
         });
 
-        // Handle errors
-        this.socket.once('error', (error) => {
-          clearTimeout(timeout);
-          reject(error);
-        });
+        // Set up event listeners
+    this.setupWalletConnectListeners();
+      }
+
+      // Create connection
+      const connectResult = await this.signClient.connect({
+      requiredNamespaces: {
+        eip155: {
+          methods: [
+            'eth_sign',
+            'personal_sign',
+            'eth_signTypedData',
+              'eth_signTypedData_v4',
+              'eth_sendTransaction'
+          ],
+          chains: [`eip155:${chainId}`],
+            events: ['accountsChanged', 'chainChanged']
+          }
+        }
       });
+
+      // Show QR code
+    this.buffer.innerHTML = '';
+    const qrContainer = document.createElement('div');
+      qrContainer.className = 'max-w-2xl mx-auto bg-gray-800 p-6 rounded-lg border border-gray-700 shadow-lg';
+      
+      // Create title section
+      const titleSection = document.createElement('div');
+      titleSection.className = 'text-center mb-6';
+      
+      const title = document.createElement('h3');
+      title.className = 'text-xl font-bold text-white mb-2';
+      title.textContent = 'Connect Your Wallet';
+      
+      const subtitle = document.createElement('p');
+      subtitle.className = 'text-gray-400 text-sm';
+      subtitle.textContent = 'Scan the QR code with your WalletConnect-enabled wallet';
+      
+      titleSection.appendChild(title);
+      titleSection.appendChild(subtitle);
+      qrContainer.appendChild(titleSection);
+      
+      // Create QR code section
+      const qrSection = document.createElement('div');
+      qrSection.className = 'flex flex-col items-center justify-center bg-gray-900 p-8 rounded-lg mb-6';
+      
+      const qrCanvas = document.createElement('canvas');
+      qrCanvas.className = 'bg-white p-4 rounded-lg shadow-lg';
+      qrSection.appendChild(qrCanvas);
+      qrContainer.appendChild(qrSection);
+
+      // Add copy link section
+      const copySection = document.createElement('div');
+      copySection.className = 'bg-gray-900 p-4 rounded-lg';
+      
+      const copyLabel = document.createElement('p');
+      copyLabel.className = 'text-sm font-medium text-gray-400 mb-3';
+      copyLabel.textContent = 'Or copy connection link';
+      copySection.appendChild(copyLabel);
+      
+      const copyContainer = document.createElement('div');
+      copyContainer.className = 'flex items-center gap-2';
+      
+      const copyInput = document.createElement('input');
+      copyInput.type = 'text';
+      copyInput.value = connectResult.uri;
+      copyInput.readOnly = true;
+      copyInput.className = 'flex-1 bg-gray-700 text-white px-3 py-2 rounded-lg text-sm font-mono border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer';
+      
+      const copyButton = document.createElement('button');
+      copyButton.className = 'bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors duration-200 flex-shrink-0 focus:outline-none focus:ring-2 focus:ring-blue-500';
+      copyButton.textContent = 'Copy';
+      
+      // Add copy functionality
+      copyButton.onclick = async () => {
+        try {
+          await navigator.clipboard.writeText(connectResult.uri);
+          copyButton.textContent = 'Copied!';
+          copyButton.className = 'bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors duration-200 flex-shrink-0 focus:outline-none focus:ring-2 focus:ring-green-500';
+          setTimeout(() => {
+            copyButton.textContent = 'Copy';
+            copyButton.className = 'bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors duration-200 flex-shrink-0 focus:outline-none focus:ring-2 focus:ring-blue-500';
+          }, 2000);
+        } catch (err) {
+          console.error('Failed to copy:', err);
+        }
+      };
+      
+      copyContainer.appendChild(copyInput);
+      copyContainer.appendChild(copyButton);
+      copySection.appendChild(copyContainer);
+      qrContainer.appendChild(copySection);
+      
+    this.buffer.appendChild(qrContainer);
+
+    // Generate QR code
+      await QRCode.toCanvas(qrCanvas, connectResult.uri, {
+        width: 300,
+        margin: 2,
+        color: {
+          dark: '#000000',
+          light: '#ffffff'
+        }
+      });
+
+      // Wait for approval
+      const session = await connectResult.approval();
+      this.sessionTopic = session.topic;
+
+      // Get the connected address
+      const account = session.namespaces.eip155.accounts[0].split(':')[2];
+      this.signerAddress = account;
+
+      // Update the signer display
+      await this.updateSignerDisplay();
+
+      // Clear QR code and show success message
+      this.buffer.innerHTML = '';
+      const successMsg = document.createElement('p');
+      successMsg.textContent = 'Wallet connected successfully!';
+      successMsg.className = 'text-green-400';
+      this.buffer.appendChild(successMsg);
+
     } catch (error: unknown) {
-      console.error('Failed to load Safe info:', error);
-      // Clear any cached data since the Safe doesn't exist on this network
-      this.clearSafeInfoCache();
-      // Show error in buffer
+      // Clear session state on error
+      this.sessionTopic = null;
+      this.signerAddress = null;
+      this.signerAddressDisplay.textContent = '';
+      
+      console.error('WalletConnect initialization failed:', error);
       this.buffer.innerHTML = '';
       const errorMsg = document.createElement('p');
       errorMsg.textContent = `Error: ${error instanceof Error ? error.message : 'Unknown error'}`;
@@ -1562,336 +2622,6 @@ class VimApp {
       throw error;
     }
   }
-
-  private clearSafeInfoCache(): void {
-    // Clear all cached data
-    this.cachedSafeInfo = null;
-    this.txFormData = null;
-    
-    // Clear any displayed Safe info from the buffer
-    if (this.buffer.textContent?.includes('Owners:') || this.buffer.textContent?.includes('Threshold:')) {
-      this.buffer.textContent = '';
-      this.buffer.className = 'flex-1 p-4 overflow-y-auto';
-    }
-  }
-
-  private displaySafeInfo(info: SafeInfo): void {
-    // First verify that the cached info matches current network
-    if (this.cachedSafeInfo && 
-        (this.cachedSafeInfo.network !== this.selectedNetwork.name || 
-         this.cachedSafeInfo.chainId !== this.selectedNetwork.chainId)) {
-      // If network mismatch, clear cache and reload
-      this.clearSafeInfoCache();
-      this.loadAndCacheSafeInfo().then(() => {
-        if (this.cachedSafeInfo) {
-          this.displaySafeInfo(this.cachedSafeInfo);
-        }
-      });
-      return;
-    }
-
-    // Clear the buffer and ensure proper layout
-    this.buffer.innerHTML = '';
-    this.buffer.className = 'flex-1 p-4 overflow-y-auto';
-    this.mainContent.classList.add('hidden');
-    this.helpContainer.innerHTML = '';
-    this.helpContainer.classList.add('hidden');
-    this.helpScreen.innerHTML = '';
-    this.helpScreen.classList.add('hidden');
-
-    // Create main container with responsive spacing
-    const mainContainer = document.createElement('div');
-    mainContainer.className = 'w-full space-y-4 sm:space-y-6';
-
-    // Network Info Box
-    const networkBox = document.createElement('div');
-    networkBox.className = 'bg-[#2c2c2c] p-4 sm:p-6 rounded-lg border border-gray-700 w-full shadow-lg';
-
-    const networkLabel = document.createElement('h3');
-    networkLabel.className = 'text-gray-400 text-xs font-medium mb-2';
-    networkLabel.textContent = 'Network:';
-
-    const networkValue = document.createElement('p');
-    networkValue.className = 'text-gray-300 text-xs';
-    networkValue.textContent = this.selectedNetwork.displayName;
-
-    networkBox.appendChild(networkLabel);
-    networkBox.appendChild(networkValue);
-    mainContainer.appendChild(networkBox);
-
-    // Owners Box
-    const ownersBox = document.createElement('div');
-    ownersBox.className = 'bg-[#2c2c2c] p-4 sm:p-6 rounded-lg border border-gray-700 w-full shadow-lg';
-
-    const ownersLabel = document.createElement('h3');
-    ownersLabel.className = 'text-gray-400 text-xs font-medium mb-2';
-    ownersLabel.textContent = 'Owners:';
-
-    const ownersList = document.createElement('ul');
-    ownersList.className = 'divide-y divide-gray-700';
-    for (const owner of info.owners) {
-      const ensName = info.ensNames[owner];
-      const ownerItem = document.createElement('li');
-      ownerItem.className = 'py-3 flex items-start space-x-3';
-      
-      // Add owner status indicator
-      const isCurrentSigner = this.signerAddress === owner;
-      const statusIndicator = document.createElement('div');
-      statusIndicator.className = `mt-1.5 h-2 w-2 rounded-full ${isCurrentSigner ? 'bg-green-500' : 'bg-gray-500'}`;
-      
-      const ownerContent = document.createElement('div');
-      ownerContent.className = 'flex-1 min-w-0';
-      
-      if (ensName) {
-        ownerContent.innerHTML = `
-          <p class="text-sm font-medium text-blue-400 truncate">${ensName}</p>
-          <p class="text-xs text-gray-400 font-mono break-all">${owner}</p>
-        `;
-      } else {
-        ownerContent.innerHTML = `
-          <p class="text-xs text-gray-400 font-mono break-all">${owner}</p>
-        `;
-      }
-      
-      ownerItem.appendChild(statusIndicator);
-      ownerItem.appendChild(ownerContent);
-      ownersList.appendChild(ownerItem);
-    }
-
-    ownersBox.appendChild(ownersLabel);
-    ownersBox.appendChild(ownersList);
-    mainContainer.appendChild(ownersBox);
-
-    // Threshold Box
-    const thresholdBox = document.createElement('div');
-    thresholdBox.className = 'bg-[#2c2c2c] p-4 sm:p-6 rounded-lg border border-gray-700 w-full shadow-lg';
-
-    const thresholdLabel = document.createElement('p');
-    thresholdLabel.className = 'text-gray-400 text-xs font-medium mb-2';
-    thresholdLabel.textContent = 'Threshold:';
-
-    const thresholdValue = document.createElement('p');
-    thresholdValue.className = 'text-gray-300 text-xs';
-    thresholdValue.textContent = `${info.threshold} out of ${info.owners.length} signers.`;
-
-    thresholdBox.appendChild(thresholdLabel);
-    thresholdBox.appendChild(thresholdValue);
-    mainContainer.appendChild(thresholdBox);
-
-    // Append the main container to buffer
-    this.buffer.appendChild(mainContainer);
-  }
-
-  private async initializeWalletConnect(chainId: number): Promise<void> {
-    this.signClient = await SignClient.init({
-      projectId: import.meta.env.VITE_WALLET_CONNECT_PROJECT_ID || 'your_wallet_connect_project_id',
-      metadata: {
-        name: 'Minimalist Safe{Wallet}',
-        description: 'A minimalist Safe app with Vim-like keybindings',
-        url: 'http://localhost:3000',
-        icons: ['https://walletconnect.com/walletconnect-logo.png'],
-      },
-    });
-
-    // Set up WalletConnect event listeners
-    this.setupWalletConnectListeners();
-
-    const { uri, approval } = await this.signClient.connect({
-      requiredNamespaces: {
-        eip155: {
-          methods: [
-            'eth_sign',
-            'personal_sign',
-            'eth_signTypedData',
-            'eth_signTypedData_v4'
-          ],
-          chains: [`eip155:${chainId}`],
-          events: ['chainChanged', 'accountsChanged'],
-        },
-      },
-    });
-
-    if (!uri) {
-      throw new Error('Failed to generate WalletConnect URI');
-    }
-
-    // Clear the buffer and ensure proper layout
-    this.buffer.innerHTML = '';
-    this.buffer.className = 'flex-1 p-4 overflow-y-auto';
-    this.mainContent.classList.add('hidden');
-    this.helpContainer.innerHTML = '';
-    this.helpContainer.classList.add('hidden');
-    this.helpScreen.innerHTML = '';
-    this.helpScreen.classList.add('hidden');
-
-    // Create a container for the QR code
-    const qrContainer = document.createElement('div');
-    qrContainer.className = 'flex flex-col items-center justify-center min-h-[400px]';
-    
-    const text = document.createElement('p');
-    text.textContent = 'Connect your wallet by scanning the QR code below:';
-    text.className = 'text-center mb-4 text-gray-300';
-    
-    const canvas = document.createElement('canvas');
-    canvas.className = 'mx-auto mb-4';
-    
-    qrContainer.appendChild(text);
-    qrContainer.appendChild(canvas);
-
-    // Create an elegant pairing code container
-    const uriContainer = document.createElement('div');
-    uriContainer.className = 'w-full max-w-md bg-gray-800 rounded-lg border border-gray-700 overflow-hidden shadow-lg';
-    
-    const uriHeader = document.createElement('div');
-    uriHeader.className = 'bg-gray-700 px-4 py-2 text-gray-300 text-sm font-medium';
-    uriHeader.textContent = 'Or use pairing code';
-    
-    const uriBody = document.createElement('div');
-    uriBody.className = 'p-3 flex items-center gap-2';
-    
-    const uriInput = document.createElement('input');
-    uriInput.readOnly = true;
-    uriInput.value = uri;
-    uriInput.className = 'bg-gray-900 text-gray-300 px-3 py-2 rounded flex-grow font-mono text-xs border border-gray-700 hover:border-gray-600 focus:border-blue-500 outline-none';
-    
-    const copyButton = document.createElement('button');
-    copyButton.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" /></svg>';
-    copyButton.className = 'bg-blue-600 hover:bg-blue-700 text-white p-2 rounded-md flex items-center justify-center transition-colors duration-150';
-    copyButton.title = 'Copy to clipboard';
-    copyButton.type = 'button';
-    
-    copyButton.onclick = (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      
-      navigator.clipboard.writeText(uri)
-        .then(() => {
-          // Change button to show success state
-          copyButton.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>';
-          copyButton.classList.remove('bg-blue-600', 'hover:bg-blue-700');
-          copyButton.classList.add('bg-green-600', 'hover:bg-green-700');
-          
-          setTimeout(() => {
-            // Revert button to original state
-            copyButton.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" /></svg>';
-            copyButton.classList.remove('bg-green-600', 'hover:bg-green-700');
-            copyButton.classList.add('bg-blue-600', 'hover:bg-blue-700');
-          }, 2000);
-          
-          // Return focus to command input
-          setTimeout(() => {
-            this.commandInput.focus();
-          }, 100);
-        })
-        .catch(err => {
-          console.error('Failed to copy: ', err);
-          setTimeout(() => {
-            this.commandInput.focus();
-          }, 100);
-        });
-    };
-
-    // Add click handler to input for better UX
-    uriInput.onclick = (e) => {
-      e.preventDefault();
-      uriInput.select();
-      setTimeout(() => {
-        this.commandInput.focus();
-      }, 100);
-    };
-    
-    uriBody.appendChild(uriInput);
-    uriBody.appendChild(copyButton);
-    
-    uriContainer.appendChild(uriHeader);
-    uriContainer.appendChild(uriBody);
-    
-    qrContainer.appendChild(uriContainer);
-
-    // Add the QR code container to the buffer
-    this.buffer.appendChild(qrContainer);
-
-    // Generate QR code
-    await QRCode.toCanvas(canvas, uri, { width: 300 }, (error: Error | null | undefined) => {
-      if (error) {
-        console.error('QR Code rendering error:', error);
-        this.buffer.textContent = `Error generating QR code: ${error.message}`;
-        this.buffer.className = 'flex-1 p-4 overflow-y-auto text-red-500';
-      }
-    });
-
-    try {
-      const session = await approval();
-      this.sessionTopic = session.topic; // Store the session topic
-      const address = session.namespaces.eip155.accounts[0].split(':')[2];
-      this.signerAddress = address;
-      const ensName = await this.resolveEnsName(address);
-
-      // Clear the buffer and show success message
-      this.buffer.innerHTML = '';
-      const successMessage = document.createElement('p');
-      successMessage.textContent = `Connected: ${ensName ? `${ensName} (${truncateAddress(address)})` : truncateAddress(address)}`;
-      successMessage.className = 'text-green-400';
-      this.buffer.appendChild(successMessage);
-      this.buffer.className = 'flex-1 p-4 overflow-y-auto';
-      
-      // Update signer address display with truncated address
-      this.signerAddressDisplay.textContent = ensName 
-        ? `${ensName} (${truncateAddress(address)})` 
-        : truncateAddress(address);
-      
-      // Reset command state and focus the command input
-      this.command = '';
-      this.updateStatus();
-      
-      // Ensure the command input is properly reset and focused
-      this.commandInput.value = '';
-      this.commandInput.blur();
-      setTimeout(() => {
-        this.commandInput.focus();
-        console.log('Command input focused after connection');
-      }, 100);
-    } catch (error: unknown) {
-      console.error('WalletConnect session approval failed:', error);
-      this.buffer.textContent = `Error establishing session: ${error instanceof Error ? error.message : 'Unknown error'}`;
-      this.buffer.className = 'flex-1 p-4 overflow-y-auto text-red-500';
-      
-      // Reset command state
-      this.command = '';
-      this.updateStatus();
-      this.commandInput.value = '';
-      this.commandInput.blur();
-      setTimeout(() => this.commandInput.focus(), 100);
-      throw error;
-    }
-  }
-
-  private async signMessage(message: string): Promise<string | null> {
-    try {
-      // Request signature using WalletConnect v2 with eth_signTypedData_v4
-      const signature = await this.signClient.request({
-        topic: this.sessionTopic!,
-        chainId: `eip155:${this.selectedNetwork.chainId}`,
-        request: {
-          method: 'eth_signTypedData_v4',
-          params: [
-            this.signerAddress!.toLowerCase(),
-            message
-          ]
-        }
-      });
-
-      return signature as string;
-    } catch (error) {
-      console.error('Error signing message:', error);
-      const errorMsg = document.createElement('p');
-      errorMsg.textContent = `Error: ${error instanceof Error ? error.message : 'Failed to sign message'}`;
-      errorMsg.className = 'text-red-500 mt-4';
-      this.buffer.appendChild(errorMsg);
-      return null;
-    }
-  }
-
 }
 
 export default VimApp;
