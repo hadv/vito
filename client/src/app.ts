@@ -1646,7 +1646,7 @@ class VimApp {
         `;
         this.buffer.appendChild(errorMsg);
       }
-    } else if (this.command === ':pool') {
+    } else if (this.command === ':p') {
       if (this.mode !== 'TX') {
         this.buffer.textContent = 'Please switch to TX mode first by pressing "e" key';
         this.buffer.className = 'flex-1 p-4 overflow-y-auto text-yellow-400';
@@ -1868,7 +1868,7 @@ class VimApp {
     // Add helper text
     const helperText = document.createElement('p');
     helperText.className = 'mt-6 text-sm text-gray-400';
-    helperText.textContent = 'Fill in the transaction details and use :pool command to propose the transaction.';
+    helperText.textContent = 'Fill in the transaction details and use :p command to propose the transaction.';
     form.appendChild(helperText);
 
     // Assemble the form
