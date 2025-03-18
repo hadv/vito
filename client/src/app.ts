@@ -12,6 +12,7 @@ import { SafeTxPool } from './managers/transactions';
 import { prepareTransactionRequest, calculateSafeTxHash } from './utils/transaction';
 import { getExplorerUrl } from './config/explorers';
 import { formatSafeSignatures } from './utils/signatures';
+import { PriceOracle } from './services/oracle';
 
 class VimApp {
   private buffer: HTMLDivElement;
@@ -2515,8 +2516,59 @@ class VimApp {
     title.className = 'text-xl font-bold text-white mb-4';
     title.textContent = 'Safe Information';
     container.appendChild(title);
-
-    // Create info box
+    
+    // Create tabs
+    const tabsContainer = document.createElement('div');
+    tabsContainer.className = 'border-b border-gray-700 mb-4';
+    const tabsList = document.createElement('div');
+    tabsList.className = 'flex';
+    
+    // Create tabs
+    const tabs = [
+      { id: 'info', label: 'Info' },
+      { id: 'assets', label: 'Assets' }
+    ];
+    
+    const tabBodies: {[key: string]: HTMLDivElement} = {};
+    
+    // Create tab buttons
+    tabs.forEach((tab, index) => {
+      const tabButton = document.createElement('button');
+      tabButton.className = `py-2 px-4 font-medium ${index === 0 ? 'text-blue-400 border-b-2 border-blue-400' : 'text-gray-400 hover:text-blue-300'}`;
+      tabButton.textContent = tab.label;
+      tabButton.dataset.tab = tab.id;
+      
+      // Create tab content container
+      const tabContent = document.createElement('div');
+      tabContent.className = 'tab-content';
+      tabContent.id = `${tab.id}-content`;
+      tabContent.style.display = index === 0 ? 'block' : 'none';
+      tabBodies[tab.id] = tabContent;
+      
+      // Add click event
+      tabButton.addEventListener('click', () => {
+        // Remove active class from all tabs
+        document.querySelectorAll('[data-tab]').forEach(t => {
+          (t as HTMLElement).className = 'py-2 px-4 font-medium text-gray-400 hover:text-blue-300';
+        });
+        
+        // Hide all tab contents
+        Object.values(tabBodies).forEach(content => {
+          content.style.display = 'none';
+        });
+        
+        // Set active tab
+        tabButton.className = 'py-2 px-4 font-medium text-blue-400 border-b-2 border-blue-400';
+        tabBodies[tab.id].style.display = 'block';
+      });
+      
+      tabsList.appendChild(tabButton);
+    });
+    
+    tabsContainer.appendChild(tabsList);
+    container.appendChild(tabsContainer);
+    
+    // Create the Info tab content
     const infoBox = document.createElement('div');
     infoBox.className = 'bg-gray-700 p-4 rounded-lg';
     
@@ -2560,8 +2612,127 @@ class VimApp {
     });
 
     infoBox.appendChild(infoList);
-    container.appendChild(infoBox);
+    tabBodies['info'].appendChild(infoBox);
+    
+    // Create the Assets tab content
+    const assetsBox = document.createElement('div');
+    assetsBox.className = 'bg-gray-700 p-4 rounded-lg';
+    
+    // Show loading indicator initially
+    assetsBox.innerHTML = `
+      <div class="flex justify-center items-center p-4">
+        <span class="text-gray-400">Loading token balances...</span>
+      </div>
+    `;
+    
+    tabBodies['assets'].appendChild(assetsBox);
+    
+    // Add tab bodies to container
+    Object.values(tabBodies).forEach(content => {
+      container.appendChild(content);
+    });
+    
     this.buffer.appendChild(container);
+    
+    // Fetch token balances
+    this.fetchTokenBalances(assetsBox);
+  }
+  
+  // New method to fetch and display token balances
+  private async fetchTokenBalances(container: HTMLElement): Promise<void> {
+    if (!this.safeAddress || !this.provider) {
+      container.innerHTML = `
+        <div class="p-4 text-center">
+          <span class="text-red-400">Error: No safe address or provider available</span>
+        </div>
+      `;
+      return;
+    }
+    
+    try {
+      // Get native token (ETH) balance
+      const ethBalance = await this.provider.getBalance(this.safeAddress);
+      
+      // Clear loading and set up table
+      container.innerHTML = '';
+      
+      // Add title
+      const title = document.createElement('div');
+      title.className = 'mb-3 pb-2 border-b border-gray-600';
+      title.innerHTML = `
+        <h4 class="text-white font-medium">Token Balances</h4>
+        <p class="text-gray-400 text-xs">Safe: ${truncateAddress(this.safeAddress)}</p>
+      `;
+      container.appendChild(title);
+      
+      // Create table
+      const table = document.createElement('table');
+      table.className = 'w-full text-sm bg-gray-700 rounded-lg overflow-hidden';
+      
+      // Create table header
+      const thead = document.createElement('thead');
+      thead.className = 'text-left text-gray-400 border-b border-gray-600 bg-gray-800';
+      thead.innerHTML = `
+        <tr>
+          <th class="py-2 px-4">Asset</th>
+          <th class="py-2 px-4 text-right">Balance</th>
+          <th class="py-2 px-4 text-right">Value</th>
+        </tr>
+      `;
+      table.appendChild(thead);
+      
+      // Create table body
+      const tbody = document.createElement('tbody');
+      
+      // Get network specific ETH name directly from the network config
+      const nativeCurrencyName = this.selectedNetwork.nativeTokenName;
+      
+      // Add ETH balance row
+      const ethRow = document.createElement('tr');
+      ethRow.className = 'border-b border-gray-600 hover:bg-gray-750';
+      
+      // Get real-time ETH price from public oracle instead of using mock price
+      const ethPrice = await PriceOracle.getEthPrice(this.provider);
+      const ethBalanceFormatted = ethers.formatEther(ethBalance);
+      const ethValueUsd = parseFloat(ethBalanceFormatted) * ethPrice;
+      
+      ethRow.innerHTML = `
+        <td class="py-3 px-4">
+          <div class="flex items-center space-x-2">
+            <span class="text-white font-medium">${nativeCurrencyName}</span>
+          </div>
+        </td>
+        <td class="py-3 px-4 text-right font-mono text-white">${ethBalanceFormatted} ETH</td>
+        <td class="py-3 px-4 text-right text-white">$${ethValueUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+      `;
+      tbody.appendChild(ethRow);
+      
+      // TODO: In a real implementation, you would fetch ERC20 token balances here
+      // This would typically involve:
+      // 1. Getting a list of tokens owned by the safe
+      // 2. For each token, calling the balanceOf method on the token contract
+      // 3. Getting the USD value of each token from an oracle or price feed
+      
+      // For now, just add a placeholder row for ERC20 tokens
+      const erc20Row = document.createElement('tr');
+      erc20Row.innerHTML = `
+        <td colspan="3" class="py-4 px-4 text-center text-gray-400 italic">
+          To fetch ERC20 tokens, implementation would need to integrate with a token indexing service and price oracle.
+        </td>
+      `;
+      tbody.appendChild(erc20Row);
+      
+      table.appendChild(tbody);
+      container.appendChild(table);
+      
+    } catch (error) {
+      console.error('Error fetching token balances:', error);
+      container.innerHTML = `
+        <div class="p-4 text-center">
+          <span class="text-red-400">Error fetching token balances</span>
+        </div>
+      `;
+    }
   }
 
   private updateTitle(): void {
