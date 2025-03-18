@@ -12,6 +12,7 @@ import { SafeTxPool } from './managers/transactions';
 import { prepareTransactionRequest, calculateSafeTxHash } from './utils/transaction';
 import { getExplorerUrl } from './config/explorers';
 import { formatSafeSignatures } from './utils/signatures';
+import { PriceOracle } from './services/oracle';
 
 class VimApp {
   private buffer: HTMLDivElement;
@@ -2690,11 +2691,10 @@ class VimApp {
       const ethRow = document.createElement('tr');
       ethRow.className = 'border-b border-gray-600 hover:bg-gray-750';
       
-      // Mock ETH price as $2,500 for demonstration
-      // In a real implementation, you would fetch the current price
-      const mockEthPrice = 2500;
+      // Get real-time ETH price from public oracle instead of using mock price
+      const ethPrice = await PriceOracle.getEthPrice(this.provider);
       const ethBalanceFormatted = ethers.formatEther(ethBalance);
-      const ethValueUsd = parseFloat(ethBalanceFormatted) * mockEthPrice;
+      const ethValueUsd = parseFloat(ethBalanceFormatted) * ethPrice;
       
       ethRow.innerHTML = `
         <td class="py-3 px-4">
