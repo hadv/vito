@@ -1,7 +1,7 @@
 import { ethers } from 'ethers';
-import { NetworkConfig } from '../types/NetworkConfig';
+import { NetworkConfig } from '../types/network';
 import { SAFE_TX_POOL_ABI } from '../config/contracts';
-import { SafeTransaction } from '../types/SafeTransactionData';
+import { SafeTransaction } from '../types/safe';
 
 // Interface for the contract
 type SafeTxPoolContract = ethers.Contract & {

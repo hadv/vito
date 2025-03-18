@@ -1,7 +1,4 @@
-interface Command {
-  cmd: string;
-  desc: string;
-}
+import { Command } from '../types/ui';
 
 export const COMMANDS: Command[] = [
   { cmd: ':c', desc: 'Connect a Safe wallet' },

@@ -1,4 +1,4 @@
-import { NetworkConfig } from '../types/NetworkConfig';
+import { NetworkConfig } from '../types/network';
 
 // Import contract artifacts
 import SafeTxPoolArtifact from '../../../contracts/out/SafeTxPool.sol/SafeTxPool.json' assert { type: 'json' };

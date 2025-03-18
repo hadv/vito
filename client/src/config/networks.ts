@@ -1,4 +1,4 @@
-import { NetworkConfig } from '../types/NetworkConfig';
+import { NetworkConfig } from '../types/network';
 
 export const NETWORKS: { [key: string]: NetworkConfig } = {
   mainnet: {
