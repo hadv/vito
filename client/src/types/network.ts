@@ -3,6 +3,7 @@ export interface NetworkConfig {
   chainId: number;
   provider: string;
   displayName: string;
+  nativeTokenName: string;
   rpcUrl?: string;
   safeService?: string;
   blockExplorer?: string;
