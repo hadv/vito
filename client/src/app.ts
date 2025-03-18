@@ -10,6 +10,8 @@ import { COMMANDS } from './config/commands';
 import { getContractAddress } from './config/contracts';
 import { SafeTxPool } from './managers/SafeTxPool';
 import { prepareTransactionRequest, calculateSafeTxHash } from './utils/transaction';
+import { getExplorerUrl } from './config/explorers';
+import { formatSafeSignatures } from './utils/signatures';
 
 class VimApp {
   private buffer: HTMLDivElement;
@@ -1374,20 +1376,16 @@ class VimApp {
               this.signerAddress,
               JSON.stringify({
                 domain: {
-                  name: 'Safe Transaction',
-                  version: '1.0',
                   chainId: this.selectedNetwork.chainId,
                   verifyingContract: this.safeAddress
                 },
-                primaryType: 'SafeTransaction',
+                primaryType: 'SafeTx',
                 types: {
                   EIP712Domain: [
-                    { name: 'name', type: 'string' },
-                    { name: 'version', type: 'string' },
                     { name: 'chainId', type: 'uint256' },
                     { name: 'verifyingContract', type: 'address' }
                   ],
-                  SafeTransaction: [
+                  SafeTx: [
                     { name: 'to', type: 'address' },
                     { name: 'value', type: 'uint256' },
                     { name: 'data', type: 'bytes' },
@@ -1397,8 +1395,7 @@ class VimApp {
                     { name: 'gasPrice', type: 'uint256' },
                     { name: 'gasToken', type: 'address' },
                     { name: 'refundReceiver', type: 'address' },
-                    { name: 'nonce', type: 'uint256' },
-                    { name: 'safeTxHash', type: 'bytes32' }
+                    { name: 'nonce', type: 'uint256' }
                   ]
                 },
                 message: {
@@ -1411,8 +1408,7 @@ class VimApp {
                   gasPrice: '0',
                   gasToken: '0x0000000000000000000000000000000000000000',
                   refundReceiver: '0x0000000000000000000000000000000000000000',
-                  nonce: nonce.toString(),
-                  safeTxHash: formattedHash
+                  nonce: nonce.toString()
                 }
               })
             ]
@@ -1663,6 +1659,28 @@ class VimApp {
         return;
       }
       await this.proposeToSafeTxPool();
+    } else if (this.command === ':e') {
+      if (!this.selectedTxHash) {
+        this.buffer.textContent = 'Please select a transaction to execute';
+        this.buffer.className = 'flex-1 p-4 overflow-y-auto text-yellow-400';
+        return;
+      }
+
+      if (!this.signerAddress) {
+        this.buffer.textContent = 'Please connect a wallet first using :wc';
+        this.buffer.className = 'flex-1 p-4 overflow-y-auto text-yellow-400';
+        return;
+      }
+
+      if (!this.signClient || !this.sessionTopic) {
+        this.buffer.textContent = 'WalletConnect session not found. Please reconnect using :wc';
+        this.buffer.className = 'flex-1 p-4 overflow-y-auto text-yellow-400';
+        return;
+      }
+
+      await this.executeSelectedTransaction();
+    } else if (this.command === ':h') {
+      this.showHelpGuide();
     } else {
       this.buffer.textContent = `Unknown command: ${this.command}`;
       this.buffer.className = 'flex-1 p-4 overflow-y-auto text-yellow-400';
@@ -2620,6 +2638,193 @@ class VimApp {
       errorMsg.className = 'text-red-500';
       this.buffer.appendChild(errorMsg);
       throw error;
+    }
+  }
+
+  // Add this new private method after proposeToSafeTxPool method
+  private async executeSelectedTransaction(): Promise<void> {
+    if (!this.selectedTxHash || !this.signClient || !this.sessionTopic || !this.signerAddress) {
+      this.buffer.textContent = 'Error: No transaction selected or wallet not connected.';
+      return;
+    }
+
+    try {
+      // Get signer account
+      const signerAccount = this.signerAddress;
+      if (!signerAccount) throw new Error('Failed to get signer account');
+
+      // Get cached Safe info for threshold
+      if (!this.cachedSafeInfo) {
+        await this.loadAndCacheSafeInfo();
+      }
+      
+      // Get contract address for current network
+      const contractAddresses = getContractAddress(this.selectedNetwork);
+      
+      // Get transaction details from the SafeTxPool contract
+      const safeTxPool = new SafeTxPool(contractAddresses.safeTxPool, this.selectedNetwork);
+      let txDetails;
+      try {
+        txDetails = await safeTxPool.getTransactionDetails(this.selectedTxHash);
+      } catch (error) {
+        console.error("Error fetching transaction details:", error);
+        throw new Error(`Failed to retrieve transaction details: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      }
+      
+      if (!txDetails || !txDetails.to) {
+        throw new Error('Invalid transaction: missing required fields');
+      }
+      
+      // Get signatures array
+      const signatures = txDetails.signatures || [];
+      
+      // Format signatures for Safe contract
+      const formattedSignatures = formatSafeSignatures(signatures);
+      
+      // Create Safe transaction parameters
+      const safeInterface = new ethers.Interface([
+        'function execTransaction(address to, uint256 value, bytes data, uint8 operation, uint256 safeTxGas, uint256 baseGas, uint256 gasPrice, address gasToken, address refundReceiver, bytes signatures) returns (bool)'
+      ]);
+
+      // Ensure data is properly formatted
+      const data = txDetails.data || '0x';
+      const value = txDetails.value || '0x0';
+      
+      // Create the transaction parameters exactly as Safe expects them
+      const params = [
+        txDetails.to,
+        value,
+        data,
+        txDetails.operation,
+        0, // safeTxGas
+        0, // baseGas
+        0, // gasPrice
+        ethers.ZeroAddress, // gasToken
+        ethers.ZeroAddress, // refundReceiver
+        formattedSignatures // Use the formatted signatures
+      ];
+      
+      // Encode the transaction data
+      const encodedTxData = safeInterface.encodeFunctionData('execTransaction', params);
+      
+      // Prepare transaction request
+      const request = await prepareTransactionRequest({
+        provider: this.provider,
+        signerAddress: signerAccount,
+        sessionTopic: this.sessionTopic!,
+        selectedNetwork: this.selectedNetwork,
+        contractAddress: txDetails.safe,
+        encodedTxData,
+        requestId: Math.floor(Math.random() * 1000000)
+      });
+
+      // Show execution confirmation UI
+      this.buffer.innerHTML = '';
+      const executionMsg = document.createElement('div');
+      executionMsg.className = 'max-w-2xl mx-auto bg-yellow-900/50 p-6 rounded-lg border border-yellow-700 shadow-lg';
+      executionMsg.innerHTML = `
+        <div class="flex items-center gap-3 mb-4">
+          <svg class="w-6 h-6 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+          </svg>
+          <h3 class="text-lg font-semibold text-yellow-100">Executing Safe Transaction</h3>
+        </div>
+        <div class="bg-yellow-900/50 p-4 rounded-lg space-y-3">
+          <p class="text-yellow-200 text-sm">Please review and confirm the Safe transaction details in your wallet:</p>
+          <div class="space-y-2 font-mono text-sm">
+            <p class="flex justify-between">
+              <span class="text-yellow-400">To:</span>
+              <span class="text-yellow-200">${truncateAddress(txDetails.to)}</span>
+            </p>
+            <p class="flex justify-between">
+              <span class="text-yellow-400">Value:</span>
+              <span class="text-yellow-200">${ethers.formatEther(value)} ETH</span>
+            </p>
+            <p class="flex justify-between">
+              <span class="text-yellow-400">Signatures:</span>
+              <span class="text-yellow-200">${signatures.length}/${this.cachedSafeInfo?.threshold || 1}</span>
+            </p>
+            <div class="text-yellow-300 mt-2">
+              <p>Please confirm this action in your wallet.</p>
+              <p class="text-xs mt-1">Using formatted signatures for Safe execution.</p>
+            </div>
+          </div>
+        </div>
+      `;
+      this.buffer.appendChild(executionMsg);
+
+      // Send transaction
+      let txHash;
+      try {
+        // Send the request and wait for response
+        txHash = await this.signClient.request(request);
+      } catch (error: any) {
+        // Check if user rejected
+        if (error?.message?.includes('rejected')) {
+          this.buffer.innerHTML = '';
+          const rejectionMsg = document.createElement('div');
+          rejectionMsg.className = 'bg-yellow-900/50 p-4 rounded-lg text-yellow-200';
+          rejectionMsg.innerHTML = `
+            <p>Transaction rejected by user.</p>
+            <p class="text-sm mt-2">You can try again when ready.</p>
+          `;
+          this.buffer.appendChild(rejectionMsg);
+          return;
+        }
+        throw error;
+      }
+
+      // Get the explorer URL for the transaction
+      const explorerUrl = getExplorerUrl(this.selectedNetwork.chainId);
+      const txExplorerUrl = `${explorerUrl}/tx/${txHash}`;
+
+      // Transaction succeeded message
+      this.buffer.innerHTML = '';
+      const successMsg = document.createElement('div');
+      successMsg.className = 'max-w-2xl mx-auto bg-green-900/50 p-6 rounded-lg border border-green-700 shadow-lg';
+      successMsg.innerHTML = `
+        <div class="flex items-center gap-3 mb-4">
+          <svg class="w-6 h-6 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+          </svg>
+          <h3 class="text-lg font-semibold text-green-100">Transaction Submitted</h3>
+        </div>
+        <p class="text-green-200 mb-4">Your transaction has been submitted to the blockchain.</p>
+        <div class="bg-green-900/50 p-4 rounded-lg">
+          <p class="text-green-300 font-medium text-sm mb-2">Transaction Hash:</p>
+          <p class="font-mono text-xs text-green-200 break-all mb-4">${txHash}</p>
+          <a href="${txExplorerUrl}" target="_blank" class="inline-flex items-center gap-1 text-green-400 hover:text-green-300 transition-colors">
+            <span>View on Explorer</span>
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
+            </svg>
+          </a>
+        </div>
+      `;
+      this.buffer.appendChild(successMsg);
+    } catch (error: any) {
+      console.error("Error in transaction execution:", error);
+      this.buffer.innerHTML = '';
+      
+      const errorDiv = document.createElement('div');
+      errorDiv.className = 'max-w-2xl mx-auto bg-red-900/50 p-6 rounded-lg border border-red-700 shadow-lg';
+      
+      // Create a user-friendly error message
+      let errorMessage = 'Transaction execution failed';
+      let errorDetails = error.message || 'Unknown error occurred during transaction execution';
+      
+      errorDiv.innerHTML = `
+        <div class="flex items-center gap-3 mb-4">
+          <svg class="w-6 h-6 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+          </svg>
+          <h3 class="text-xl font-semibold text-red-200">${errorMessage}</h3>
+        </div>
+        <div class="space-y-2">
+          <p class="text-red-300 text-sm mt-2">${errorDetails}</p>
+        </div>
+      `;
+      this.buffer.appendChild(errorDiv);
     }
   }
 }
