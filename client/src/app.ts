@@ -1121,12 +1121,20 @@ class VimApp {
           const rows = document.querySelectorAll('#tx-table > div:not(:first-child)');
           rows.forEach((row, i) => {
             if (i === index) {
-              row.classList.add('bg-gray-700', 'selected-tx');
+              // Apply basic focus styling but not the distinctive selection styling
+              row.classList.add('bg-gray-700');
               row.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
               // Store the selected transaction hash
               self.selectedTxHash = row.getAttribute('data-tx-hash') || null;
             } else {
-              row.classList.remove('bg-gray-700', 'selected-tx');
+              // Remove all styling from non-focused rows
+              row.classList.remove('bg-gray-700', 'selected-tx', 'border-l-4', 'border-l-yellow-500');
+              
+              // Reset any modified padding
+              const content = row.querySelector('.grid');
+              if (content) {
+                content.classList.remove('ml-2');
+              }
             }
           });
           currentFocusIndex = index;
@@ -1164,12 +1172,9 @@ class VimApp {
                   });
                   selectedRow.classList.add('bg-gray-700', 'selected-tx');
                 }
-                showTxDetails(selectedTxHash);
                 
-                // Focus the command input for immediate command entry
-                if (self.commandInput) {
-                  self.commandInput.focus();
-                }
+                // Toggle transaction details (don't move focus)
+                showTxDetails(selectedTxHash);
               }
               break;
               
@@ -1192,6 +1197,43 @@ class VimApp {
                 existingDetails.remove();
               }
               break;
+            case ' ': // Space key
+              e.preventDefault();
+              const txHashToSelect = pendingTxHashes[currentFocusIndex];
+              if (txHashToSelect) {
+                // Select the transaction
+                const selectedRow = document.querySelector(`[data-tx-hash="${txHashToSelect}"]`);
+                if (selectedRow) {
+                  // Ensure the row stays selected with more prominent styling
+                  document.querySelectorAll('#tx-table > div:not(:first-child)').forEach(row => {
+                    row.classList.remove('bg-gray-700', 'selected-tx', 'border-l-4', 'border-l-yellow-500', 'pl-3');
+                    
+                    // Reset any modified padding from previous selections
+                    const content = row.querySelector('.grid');
+                    if (content) {
+                      content.classList.remove('ml-2');
+                    }
+                  });
+                  
+                  // Add more distinctive styling to the selected row
+                  selectedRow.classList.add('bg-gray-700', 'selected-tx', 'border-l-4', 'border-l-yellow-500');
+                  
+                  // Adjust padding for the content to account for the border
+                  const content = selectedRow.querySelector('.grid');
+                  if (content) {
+                    content.classList.add('ml-2');
+                  }
+                }
+                
+                // Store the selected transaction hash
+                self.selectedTxHash = txHashToSelect;
+                
+                // Focus the command input for immediate command entry
+                if (self.commandInput) {
+                  self.commandInput.focus();
+                }
+              }
+              break;
           }
         });
 
@@ -1209,6 +1251,38 @@ class VimApp {
             self.commandInput.value = '';
             // Return focus to the container
             container.focus();
+            
+            // If there's a selected transaction, maintain its focus and enhance its styling
+            if (self.selectedTxHash) {
+              const index = pendingTxHashes.findIndex(hash => hash === self.selectedTxHash);
+              if (index >= 0) {
+                // Apply the distinctive selection styling
+                const selectedRow = document.querySelector(`[data-tx-hash="${self.selectedTxHash}"]`);
+                if (selectedRow) {
+                  // Clear previous styling from all rows
+                  document.querySelectorAll('#tx-table > div:not(:first-child)').forEach(row => {
+                    row.classList.remove('bg-gray-700', 'selected-tx', 'border-l-4', 'border-l-yellow-500', 'pl-3');
+                    
+                    // Reset any modified padding from previous selections
+                    const content = row.querySelector('.grid');
+                    if (content) {
+                      content.classList.remove('ml-2');
+                    }
+                  });
+                  
+                  // Add distinctive styling to the selected row
+                  selectedRow.classList.add('bg-gray-700', 'selected-tx', 'border-l-4', 'border-l-yellow-500');
+                  
+                  // Adjust padding for the content to account for the border
+                  const content = selectedRow.querySelector('.grid');
+                  if (content) {
+                    content.classList.add('ml-2');
+                  }
+                }
+                
+                updateFocus(index);
+              }
+            }
           }
         });
 
@@ -1348,6 +1422,35 @@ class VimApp {
         const safeTxPool = new SafeTxPool(contractAddresses.safeTxPool, this.selectedNetwork);
         const txDetails = await safeTxPool.getTransactionDetails(this.selectedTxHash);
 
+        // Check if user has already signed this transaction
+        if (this.signerAddress) {
+          const hasAlreadySigned = await safeTxPool.hasSignedTransaction(this.selectedTxHash, this.signerAddress);
+          if (hasAlreadySigned) {
+            this.buffer.innerHTML = '';
+            const alreadySignedMsg = document.createElement('div');
+            alreadySignedMsg.className = 'max-w-2xl mx-auto bg-yellow-900/50 p-6 rounded-lg border border-yellow-700 shadow-lg';
+            alreadySignedMsg.innerHTML = `
+              <div class="flex items-center gap-3 mb-4">
+                <svg class="w-6 h-6 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                </svg>
+                <h3 class="text-lg font-semibold text-yellow-100">Already Signed</h3>
+              </div>
+              <p class="text-yellow-100 mb-4">You have already signed this transaction.</p>
+              <div class="bg-yellow-900/50 p-4 rounded-lg text-sm">
+                <p class="text-yellow-200 mb-2">What you can do next:</p>
+                <ol class="list-decimal list-inside text-yellow-100 space-y-1">
+                  <li>Wait for other owners to sign the transaction</li>
+                  <li>Execute the transaction if threshold is reached using :e command</li>
+                  <li>View other pending transactions with :l command</li>
+                </ol>
+              </div>
+            `;
+            this.buffer.appendChild(alreadySignedMsg);
+            return;
+          }
+        }
+
         // Prepare transaction data for signing
         const localTxData = {
           to: txDetails.to,
@@ -1361,8 +1464,8 @@ class VimApp {
         // Ensure data is hex
         const dataHex = localTxData.data.startsWith('0x') ? localTxData.data : `0x${localTxData.data}`;
 
-        // Get nonce from Safe contract
-        const nonce = await this.getSafeNonce(this.safeAddress);
+        // Use nonce from transaction details
+        const nonce = txDetails.nonce;
 
         // Step 1: Request signature from user
         const signRequest = {
@@ -1408,7 +1511,7 @@ class VimApp {
                   gasPrice: '0',
                   gasToken: '0x0000000000000000000000000000000000000000',
                   refundReceiver: '0x0000000000000000000000000000000000000000',
-                  nonce: nonce.toString()
+                  nonce
                 }
               })
             ]
