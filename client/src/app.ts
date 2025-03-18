@@ -8,7 +8,7 @@ import { truncateAddress } from './utils/address';
 import { NETWORKS, DEFAULT_NETWORK, getNetworkConfig } from './config/networks';
 import { COMMANDS } from './config/commands';
 import { getContractAddress } from './config/contracts';
-import { SafeTxPool } from './managers/SafeTxPool';
+import { SafeTxPool } from './managers/transactions';
 import { prepareTransactionRequest, calculateSafeTxHash } from './utils/transaction';
 import { getExplorerUrl } from './config/explorers';
 import { formatSafeSignatures } from './utils/signatures';
