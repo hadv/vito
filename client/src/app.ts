@@ -4,7 +4,7 @@ import { ethers } from 'ethers';
 import { SignClient } from '@walletconnect/sign-client';
 import { SafeInfo } from './types/safe';
 import { NetworkConfig } from './types/network';
-import { truncateAddress } from './utils/address';
+import { truncateAddress, resolveEnsName } from './utils/address';
 import { NETWORKS, DEFAULT_NETWORK, getNetworkConfig } from './config/networks';
 import { COMMANDS } from './config/commands';
 import { getContractAddress } from './config/contracts';
@@ -13,6 +13,7 @@ import { prepareTransactionRequest, calculateSafeTxHash } from './utils/transact
 import { getExplorerUrl } from './config/explorers';
 import { formatSafeSignatures } from './utils/signatures';
 import { PriceOracle } from './services/oracle';
+import { getSafeNonce, getSafeTxHashFromContract } from './utils/safe';
 
 class VimApp {
   private buffer: HTMLDivElement;
@@ -281,16 +282,6 @@ class VimApp {
     }, 100);
   }
 
-  private async resolveEnsName(address: string): Promise<string | null> {
-    try {
-      const ensName = await this.provider.lookupAddress(address);
-      return ensName;
-    } catch (error) {
-      console.error(`Failed to resolve ENS for ${address}:`, error);
-      return null;
-    }
-  }
-
   private updateStatus(): void {
     this.statusBar.textContent = this.command ? `:${this.command}` : `-- ${this.mode} --`;
   }
@@ -402,7 +393,7 @@ class VimApp {
 
       // Update the Safe address display with ENS name if available
       if (this.safeAddressDisplay) {
-      const ensName = await this.resolveEnsName(safeAddress);
+      const ensName = await resolveEnsName(safeAddress, this.provider);
         this.safeAddressDisplay.textContent = ensName 
           ? `${ensName} (${truncateAddress(safeAddress)})` 
           : truncateAddress(safeAddress);
@@ -519,7 +510,7 @@ class VimApp {
   
   private async updateSignerDisplay(): Promise<void> {
     if (this.signerAddress) {
-      const ensName = await this.resolveEnsName(this.signerAddress);
+      const ensName = await resolveEnsName(this.signerAddress, this.provider);
       this.signerAddressDisplay.textContent = ensName 
         ? `${ensName} (${truncateAddress(this.signerAddress)})` 
         : truncateAddress(this.signerAddress);
@@ -603,7 +594,7 @@ class VimApp {
         // Resolve ENS names for all owners using the current network's provider
         const ensNames: { [address: string]: string | null } = {};
       for (const owner of data.owners) {
-          ensNames[owner] = await this.resolveEnsName(owner);
+          ensNames[owner] = await resolveEnsName(owner, this.provider);
         }
 
         // Cache the data with network information
@@ -2004,62 +1995,6 @@ class VimApp {
     }, 100);
   }
 
-  private async getSafeNonce(safeAddress: string): Promise<string> {
-    // Safe contract ABI for nonce function
-    const safeAbi = [
-      "function nonce() view returns (uint256)"
-    ];
-    
-    // Create contract instance
-    const safeContract = new ethers.Contract(safeAddress, safeAbi, this.provider);
-    
-    try {
-      // Get nonce from contract
-      const nonce = await safeContract.nonce();
-      return nonce.toString();
-    } catch (error) {
-      console.error('Error getting Safe nonce:', error);
-      throw new Error('Failed to get Safe nonce');
-    }
-  }
-
-  private async getSafeTxHashFromContract(
-    to: string,
-    value: string,
-    data: string,
-    operation: number,
-    nonce: string,
-    safeAddress: string
-  ): Promise<string> {
-    // Safe contract ABI for getTransactionHash function
-    const safeAbi = [
-      "function getTransactionHash(address to, uint256 value, bytes data, uint8 operation, uint256 safeTxGas, uint256 baseGas, uint256 gasPrice, address gasToken, address refundReceiver, uint256 nonce) view returns (bytes32)"
-    ];
-    
-    // Create contract instance
-    const safeContract = new ethers.Contract(safeAddress, safeAbi, this.provider);
-    
-    try {
-      // Get hash from contract
-      const hash = await safeContract.getTransactionHash(
-        to,
-        value,
-        data,
-        operation,
-        '0', // safeTxGas
-        '0', // baseGas
-        '0', // gasPrice
-        '0x0000000000000000000000000000000000000000', // gasToken
-        '0x0000000000000000000000000000000000000000', // refundReceiver
-        nonce
-      );
-      return hash;
-    } catch (error) {
-      console.error('Error getting Safe transaction hash:', error);
-      throw new Error('Failed to get Safe transaction hash');
-    }
-  }
-
   private async proposeToSafeTxPool(): Promise<void> {
     if (this._isProposing || !this.txFormData) return;
     this._isProposing = true;
@@ -2115,7 +2050,7 @@ class VimApp {
 
       // Get contract address and prepare basic data
       const contractAddresses = getContractAddress(this.selectedNetwork);
-      const nonce = await this.getSafeNonce(this.safeAddress);
+      const nonce = await getSafeNonce(this.safeAddress, this.provider);
       
       // Convert value to hex
       const valueHex = localTxData.value.startsWith('0x') ? 
@@ -2126,13 +2061,14 @@ class VimApp {
       const dataHex = localTxData.data.startsWith('0x') ? localTxData.data : `0x${localTxData.data}`;
 
       // Get hash from Safe contract
-      const safeTxHash = await this.getSafeTxHashFromContract(
+      const safeTxHash = await getSafeTxHashFromContract(
         localTxData.to,
         valueHex,
         dataHex,
         0,
         nonce,
-        this.safeAddress
+        this.safeAddress,
+        this.provider
       );
 
       // Encode function data for the transaction to display in UI
@@ -2489,7 +2425,7 @@ class VimApp {
       // Resolve ENS names for owners
             const ensNames: { [address: string]: string | null } = {};
       for (const owner of owners) {
-              ensNames[owner] = await this.resolveEnsName(owner);
+              ensNames[owner] = await resolveEnsName(owner, this.provider);
             }
 
             this.cachedSafeInfo = {
