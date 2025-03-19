@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { SafeModule } from './safe/safe.module';
+import { TokenModule } from './token/token.module';
 
 @Module({
   imports: [
@@ -9,6 +10,7 @@ import { SafeModule } from './safe/safe.module';
       isGlobal: true, // Make env vars globally available
     }),
     SafeModule,
+    TokenModule,
   ],
 })
 export class AppModule {}
