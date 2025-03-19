@@ -9,9 +9,16 @@ export class PriceOracle {
     137: '0x45dda9cb7c25131df268515131f647d726f50608', // Polygon
   };
 
+  // Mock prices for testnets where price oracles may not be available
+  private static readonly TESTNET_MOCK_PRICES: Record<number, number> = {
+    5: 2500, // Goerli
+    11155111: 2500, // Sepolia
+  };
+
   /**
    * Fetches the current ETH price in USD from Uniswap V3 ETH/USDC pool
    * Falls back to CoinGecko if Uniswap fails or network is not supported
+   * Uses mock prices for testnets
    * @param provider The ethers provider to use for the blockchain calls
    * @returns The current ETH price in USD
    */
@@ -20,6 +27,12 @@ export class PriceOracle {
       // Get the network chain ID
       const network = await provider.getNetwork();
       const chainId = Number(network.chainId);
+
+      // Check if this is a testnet with mock prices
+      if (this.TESTNET_MOCK_PRICES[chainId]) {
+        console.log(`Using mock ETH price for testnet chain ID ${chainId}`);
+        return this.TESTNET_MOCK_PRICES[chainId];
+      }
 
       // Check if we have a Uniswap V3 pool for this network
       const poolAddress = this.UNISWAP_V3_POOLS[chainId];

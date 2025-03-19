@@ -2707,29 +2707,86 @@ class VimApp {
       `;
       tbody.appendChild(ethRow);
       
-      // TODO: In a real implementation, you would fetch ERC20 token balances here
-      // This would typically involve:
-      // 1. Getting a list of tokens owned by the safe
-      // 2. For each token, calling the balanceOf method on the token contract
-      // 3. Getting the USD value of each token from an oracle or price feed
-      
-      // For now, just add a placeholder row for ERC20 tokens
-      const erc20Row = document.createElement('tr');
-      erc20Row.innerHTML = `
-        <td colspan="3" class="py-4 px-4 text-center text-gray-400 italic">
-          To fetch ERC20 tokens, implementation would need to integrate with a token indexing service and price oracle.
-        </td>
-      `;
-      tbody.appendChild(erc20Row);
+      // Fetch ERC20 tokens from our token indexing service
+      try {
+        // Construct API URL to our token service
+        const baseUrl = window.location.hostname === 'localhost' ? 
+          'http://localhost:3000' : 
+          window.location.origin;
+        
+        // Use chainId directly from the provider instead of separate RPC URL
+        const tokenServiceUrl = `${baseUrl}/tokens/${this.safeAddress}?chainId=${this.selectedNetwork.chainId}`;
+        
+        // Fetch token balances
+        const response = await fetch(tokenServiceUrl);
+        
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const tokens = await response.json();
+        
+        // If no tokens were found, show a message
+        if (tokens.length === 0) {
+          const noTokensRow = document.createElement('tr');
+          noTokensRow.innerHTML = `
+            <td colspan="3" class="py-4 px-4 text-center text-gray-400 italic">
+              No ERC20 tokens found for this address
+            </td>
+          `;
+          tbody.appendChild(noTokensRow);
+        } else {
+          // Add rows for each token
+          tokens.forEach((token: {
+            symbol: string;
+            name: string;
+            balanceFormatted: string;
+            valueUsd: number | null;
+          }) => {
+            const tokenRow = document.createElement('tr');
+            tokenRow.className = 'border-b border-gray-600 hover:bg-gray-750';
+            
+            // Format value if available
+            const valueDisplay = token.valueUsd !== null
+              ? `$${token.valueUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+              : 'N/A';
+            
+            tokenRow.innerHTML = `
+              <td class="py-3 px-4">
+                <div class="flex items-center space-x-2">
+                  <span class="text-white font-medium">${token.symbol}</span>
+                  <span class="text-gray-400 text-xs">${token.name}</span>
+                </div>
+              </td>
+              <td class="py-3 px-4 text-right font-mono text-white">${token.balanceFormatted} ${token.symbol}</td>
+              <td class="py-3 px-4 text-right text-white">${valueDisplay}</td>
+            `;
+            tbody.appendChild(tokenRow);
+          });
+        }
+      } catch (tokenError: unknown) {
+        console.error('Error fetching ERC20 tokens:', tokenError);
+        
+        // Show error message for token fetch
+        const errorRow = document.createElement('tr');
+        const errorMessage = tokenError instanceof Error ? tokenError.message : 'Unknown error';
+        errorRow.innerHTML = `
+          <td colspan="3" class="py-4 px-4 text-center text-red-400">
+            Error fetching ERC20 tokens: ${errorMessage}
+          </td>
+        `;
+        tbody.appendChild(errorRow);
+      }
       
       table.appendChild(tbody);
       container.appendChild(table);
       
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Error fetching token balances:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       container.innerHTML = `
         <div class="p-4 text-center">
-          <span class="text-red-400">Error fetching token balances</span>
+          <span class="text-red-400">Error fetching token balances: ${errorMessage}</span>
         </div>
       `;
     }
