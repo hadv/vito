@@ -1,9 +1,11 @@
-import { Controller, Get, Param, Query, Logger, BadRequestException, InternalServerErrorException } from '@nestjs/common';
+import { Controller, Get, Param, Query, Logger, BadRequestException, InternalServerErrorException, UseInterceptors } from '@nestjs/common';
 import { TokenService, TokenInfo } from './token.service';
 import { ethers } from 'ethers';
 import { ConfigService } from '@nestjs/config';
+import { BigIntSerializerInterceptor } from './interceptors/bigint-serializer.interceptor';
 
 @Controller('tokens')
+@UseInterceptors(BigIntSerializerInterceptor)
 export class TokenController {
   private readonly logger = new Logger(TokenController.name);
   private readonly providers: Map<number, ethers.JsonRpcProvider> = new Map();
@@ -82,16 +84,7 @@ export class TokenController {
 
       this.logger.log(`Fetching token balances for address ${address} on chain ID ${chainId}`);
 
-      // Special case for Sepolia testnet (11155111) - bypass provider connection checks
-      if (chainId === 11155111) {
-        this.logger.log('Using direct token service for Sepolia testnet');
-        // Create simple provider without connection checks
-        const sepoliaProvider = new ethers.JsonRpcProvider('https://ethereum-sepolia.publicnode.com');
-        // Get token balances directly from service
-        return await this.tokenService.getTokenBalances(sepoliaProvider, address, chainId);
-      }
-
-      // For other networks, continue with normal provider handling
+      // For all networks, use the regular provider handling
       // Get provider for the requested chain ID
       const provider = this.providers.get(chainId);
       if (!provider) {

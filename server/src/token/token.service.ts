@@ -51,9 +51,7 @@ export class TokenService {
     ],
     11155111: [ // Sepolia Testnet
       '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238', // USDC
-      '0x8f821f4c90f6881d967f08dedb7030932d389b00', // USDT
       '0x3e622317f8C93f7328350cF0B56d9eD4C620C5d6', // DAI
-      '0xCA77eB3fEFe3725Dc33bccB54eDEFc3D9f764f97', // WBTC
       '0x779877A7B0D9E8603169DdbD7836e478b4624789', // LINK
     ],
     // Add more networks as needed
@@ -79,18 +77,23 @@ export class TokenService {
         
         // Sepolia Testnet
         '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238': 1.0,      // USDC
-        '0x8f821f4c90f6881d967f08dedb7030932d389b00': 1.0,      // USDT
         '0x3e622317f8C93f7328350cF0B56d9eD4C620C5d6': 1.0,      // DAI
-        '0xCA77eB3fEFe3725Dc33bccB54eDEFc3D9f764f97': 65000,    // WBTC
         '0x779877A7B0D9E8603169DdbD7836e478b4624789': 18.5,     // LINK
       };
       
       // Store the mock prices
       for (const [address, price] of Object.entries(mockPrices)) {
-        this.tokenPrices.set(address.toLowerCase(), {
-          address: address.toLowerCase(),
-          priceUsd: price,
-        });
+        try {
+          // Use proper checksum format for the address
+          const checksummedAddress = ethers.getAddress(address);
+          // Store with lowercase key for consistent lookups
+          this.tokenPrices.set(checksummedAddress.toLowerCase(), {
+            address: checksummedAddress,
+            priceUsd: price,
+          });
+        } catch (error) {
+          this.logger.error(`Invalid address in price data: ${address}`);
+        }
       }
       
       this.logger.log(`Updated prices for ${this.tokenPrices.size} tokens`);
@@ -104,26 +107,51 @@ export class TokenService {
     provider: ethers.JsonRpcProvider,
     tokenAddress: string,
   ): Promise<{ name: string; symbol: string; decimals: number }> {
-    // Normalize address for consistent lookups
-    const normalizedAddress = tokenAddress.toLowerCase();
-    
-    // Check if we already have metadata cached
-    if (this.tokenMetadata.has(normalizedAddress)) {
-      const metadata = this.tokenMetadata.get(normalizedAddress);
-      // Add non-null assertion since we already checked with .has()
-      return metadata!;
-    }
-    
     try {
-      // Create contract instance
-      const tokenContract = new ethers.Contract(tokenAddress, ERC20_ABI, provider);
+      // Ensure proper checksum format for the address
+      const checksummedAddress = ethers.getAddress(tokenAddress);
       
-      // Fetch token metadata
-      const [name, symbol, decimals] = await Promise.all([
-        tokenContract.name(),
-        tokenContract.symbol(),
-        tokenContract.decimals(),
-      ]);
+      // Normalize address for consistent lookups (lowercase for map keys)
+      const normalizedAddress = checksummedAddress.toLowerCase();
+      
+      // Check if we already have metadata cached
+      if (this.tokenMetadata.has(normalizedAddress)) {
+        const metadata = this.tokenMetadata.get(normalizedAddress);
+        this.logger.log(`Using cached metadata for token ${checksummedAddress}`);
+        // Add non-null assertion since we already checked with .has()
+        return metadata!;
+      }
+      
+      this.logger.log(`Fetching metadata for token ${checksummedAddress}`);
+      
+      // Create contract instance with checksummed address
+      const tokenContract = new ethers.Contract(checksummedAddress, ERC20_ABI, provider);
+      
+      // Fetch token metadata with individual try/catch blocks for better error isolation
+      let name = 'Unknown Token';
+      let symbol = 'UNKNOWN';
+      let decimals = 18;
+      
+      try {
+        name = await tokenContract.name();
+        this.logger.log(`Got name for ${checksummedAddress}: ${name}`);
+      } catch (nameError) {
+        this.logger.error(`Failed to get name for token ${checksummedAddress}: ${nameError.message}`);
+      }
+      
+      try {
+        symbol = await tokenContract.symbol();
+        this.logger.log(`Got symbol for ${checksummedAddress}: ${symbol}`);
+      } catch (symbolError) {
+        this.logger.error(`Failed to get symbol for token ${checksummedAddress}: ${symbolError.message}`);
+      }
+      
+      try {
+        decimals = await tokenContract.decimals();
+        this.logger.log(`Got decimals for ${checksummedAddress}: ${decimals}`);
+      } catch (decimalsError) {
+        this.logger.error(`Failed to get decimals for token ${checksummedAddress}: ${decimalsError.message}`);
+      }
       
       const metadata = { name, symbol, decimals };
       
@@ -132,7 +160,7 @@ export class TokenService {
       
       return metadata;
     } catch (error) {
-      this.logger.error(`Failed to fetch metadata for token ${tokenAddress}: ${error.message}`);
+      this.logger.error(`Failed to fetch metadata for token ${tokenAddress}: ${error.message}`, error.stack);
       // Return default values if metadata fetch fails
       return { name: 'Unknown Token', symbol: 'UNKNOWN', decimals: 18 };
     }
@@ -140,9 +168,17 @@ export class TokenService {
   
   // Gets token price from the cache
   getTokenPrice(tokenAddress: string): number | null {
-    const normalizedAddress = tokenAddress.toLowerCase();
-    const tokenInfo = this.tokenPrices.get(normalizedAddress);
-    return tokenInfo ? tokenInfo.priceUsd : null;
+    try {
+      // Ensure proper checksum format for the address
+      const checksummedAddress = ethers.getAddress(tokenAddress);
+      // Use lowercase for lookup
+      const normalizedAddress = checksummedAddress.toLowerCase();
+      const tokenInfo = this.tokenPrices.get(normalizedAddress);
+      return tokenInfo ? tokenInfo.priceUsd : null;
+    } catch (error) {
+      this.logger.error(`Error getting token price for ${tokenAddress}: ${error.message}`);
+      return null;
+    }
   }
   
   // Fetches token balances for a specific address
@@ -154,33 +190,23 @@ export class TokenService {
     const results: TokenInfo[] = [];
     
     try {
-      // Special case for Sepolia testnet - return mock data to avoid contract interaction issues
-      if (chainId === 11155111) {
-        this.logger.log(`Using mock data for Sepolia testnet (chain ID ${chainId})`);
-        
-        // Return only LINK token since that's what the wallet actually has
-        return [
-          {
-            address: '0x779877A7B0D9E8603169DdbD7836e478b4624789',
-            name: 'ChainLink Token',
-            symbol: 'LINK',
-            decimals: 18,
-            balance: '50000000000000000000',
-            balanceFormatted: '50.0',
-            priceUsd: 18.5,
-            valueUsd: 925.0,
-          }
-        ];
-      }
-      
-      // For other networks, continue with normal token balance fetching
       // Make sure we have the latest prices
       await this.updateTokenPrices(chainId);
       
       // Get list of token addresses to check
       // In a production app, this would be determined by a more sophisticated indexing service
       // that scans past transactions or uses an external API
-      const tokenAddresses = this.popularTokens[chainId] || [];
+      const rawTokenAddresses = this.popularTokens[chainId] || [];
+      
+      // Convert all addresses to proper checksum format
+      const tokenAddresses: string[] = [];
+      for (const address of rawTokenAddresses) {
+        try {
+          tokenAddresses.push(ethers.getAddress(address));
+        } catch (error) {
+          this.logger.error(`Invalid token address in configuration: ${address}`);
+        }
+      }
       
       this.logger.log(`Checking ${tokenAddresses.length} tokens for address ${walletAddress} on chain ${chainId}`);
       
@@ -190,16 +216,45 @@ export class TokenService {
         return [];
       }
       
+      // Set timeout for contract calls
+      const timeout = 10000; // 10 seconds
+      
       for (const tokenAddress of tokenAddresses) {
         try {
-          // Create contract instance
+          this.logger.log(`Checking token ${tokenAddress} for address ${walletAddress}`);
+          
+          // Create contract instance with checksummed address
           const tokenContract = new ethers.Contract(tokenAddress, ERC20_ABI, provider);
           
-          // Get balance
-          const balance = await tokenContract.balanceOf(walletAddress);
+          this.logger.log(`Contract created for ${tokenAddress}, attempting to call balanceOf`);
+          
+          // Ensure wallet address is also checksummed
+          const checksummedWalletAddress = ethers.getAddress(walletAddress);
+          
+          // Get balance with timeout
+          let balance: bigint;
+          try {
+            const balancePromise = tokenContract.balanceOf(checksummedWalletAddress);
+            
+            // Create a timeout promise
+            const timeoutPromise = new Promise<never>((_, reject) => {
+              setTimeout(() => reject(new Error(`Timeout calling balanceOf on ${tokenAddress}`)), timeout);
+            });
+            
+            // Race between the balance call and timeout
+            balance = await Promise.race([balancePromise, timeoutPromise]);
+            
+            this.logger.log(`Retrieved balance for ${tokenAddress}: ${balance.toString()}`);
+          } catch (balanceError) {
+            this.logger.error(`Error getting balance from ${tokenAddress}: ${balanceError.message}`);
+            // Skip this token and continue with the next
+            continue;
+          }
           
           // Get token metadata
           const { name, symbol, decimals } = await this.getTokenMetadata(provider, tokenAddress);
+          
+          this.logger.log(`Got metadata for ${tokenAddress}: name=${name}, symbol=${symbol}, decimals=${decimals}`);
           
           // Format balance with proper decimals
           const balanceFormatted = ethers.formatUnits(balance, decimals);
@@ -225,15 +280,21 @@ export class TokenService {
               valueUsd,
             });
             
-            this.logger.debug(`Found token ${symbol} (${name}) with balance ${balanceFormatted}`);
+            this.logger.log(`Added token ${symbol} with balance ${balanceFormatted} to results`);
+          } else {
+            this.logger.log(`Skipping token ${symbol} with zero balance`);
           }
         } catch (error) {
-          this.logger.error(`Error fetching balance for token ${tokenAddress}: ${error.message}`);
+          this.logger.error(`Error fetching balance for token ${tokenAddress}: ${error.message}`, error.stack);
           // Continue to the next token instead of failing the entire request
         }
       }
       
-      return results;
+      // Ensure all BigInt values are stringified before sending in the response
+      return results.map(token => ({
+        ...token,
+        balance: typeof token.balance === 'string' ? token.balance : String(token.balance)
+      }));
     } catch (error) {
       this.logger.error(`Error in getTokenBalances: ${error.message}`);
       
