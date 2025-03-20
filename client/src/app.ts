@@ -369,6 +369,12 @@ class VimApp {
   }
 
   private async connectWallet(safeAddress: string): Promise<void> {
+    // Prevent duplicate connection attempts
+    if (this.isConnecting) {
+      console.log('Safe connection already in progress, ignoring duplicate request');
+      return;
+    }
+    
     try {
       this.isConnecting = true;
       this.buffer.innerHTML = '';
@@ -881,9 +887,7 @@ class VimApp {
         return;
       }
 
-      // Set connecting flag
-      this.isConnecting = true;
-
+      // Remove redundant isConnecting flag since it's handled in connectWallet
       try {
         // Clear any existing Safe info cache
         this.clearSafeInfoCache();
@@ -908,8 +912,6 @@ class VimApp {
         console.error('Failed to connect to Safe:', error);
         this.buffer.textContent = `Error: ${error instanceof Error ? error.message : 'Unknown error'}`;
         this.buffer.className = 'flex-1 p-4 overflow-y-auto text-red-500';
-      } finally {
-        this.isConnecting = false;
       }
     } else if (this.command === ':wc') {
       if (!this.safeAddress) {
@@ -1377,6 +1379,12 @@ class VimApp {
       this.buffer.innerHTML = '';
       this.buffer.className = 'flex-1 p-4 overflow-y-auto';
     } else if (this.command === ':s') {
+      // Check if we're already connecting to prevent duplicate requests
+      if (this.isConnecting) {
+        console.log('Connection already in progress, ignoring :s command');
+        return;
+      }
+      
       if (this.mode !== 'TX') {
         this.buffer.textContent = 'Please switch to TX mode first by pressing "e" key';
         this.buffer.className = 'flex-1 p-4 overflow-y-auto text-yellow-400';
@@ -1401,6 +1409,9 @@ class VimApp {
       }
 
       try {
+        // Set connecting flag to prevent duplicate requests
+        this.isConnecting = true;
+        
         // Get contract address for the current network
         const contractAddresses = getContractAddress(this.selectedNetwork);
         
@@ -1736,6 +1747,9 @@ class VimApp {
           </div>
         `;
         this.buffer.appendChild(errorMsg);
+      } finally {
+        // Reset connecting flag
+        this.isConnecting = false;
       }
     } else if (this.command === ':p') {
       if (this.mode !== 'TX') {
@@ -1755,6 +1769,12 @@ class VimApp {
       }
       await this.proposeToSafeTxPool();
     } else if (this.command === ':e') {
+      // Check if we're already connecting to prevent duplicate requests
+      if (this.isConnecting) {
+        console.log('Connection already in progress, ignoring :e command');
+        return;
+      }
+      
       if (!this.selectedTxHash) {
         this.buffer.textContent = 'Please select a transaction to execute';
         this.buffer.className = 'flex-1 p-4 overflow-y-auto text-yellow-400';
@@ -1996,8 +2016,16 @@ class VimApp {
   }
 
   private async proposeToSafeTxPool(): Promise<void> {
-    if (this._isProposing || !this.txFormData) return;
+    // Check both proposing and connecting flags 
+    if (this._isProposing || this.isConnecting || !this.txFormData) {
+      if (this.isConnecting) {
+        console.log('Connection already in progress, ignoring transaction proposal');
+      }
+      return;
+    }
+    
     this._isProposing = true;
+    this.isConnecting = true; // Also set isConnecting to true
 
     try {
       // Validate requirements
@@ -2394,6 +2422,7 @@ class VimApp {
       this.buffer.appendChild(errorMsg);
     } finally {
       this._isProposing = false;
+      this.isConnecting = false; // Reset isConnecting flag
     }
   }
 
@@ -2735,7 +2764,16 @@ class VimApp {
   }
 
   private async initializeWalletConnect(chainId: number): Promise<void> {
+    // Prevent duplicate connection attempts by checking if already connecting
+    if (this.isConnecting) {
+      console.log('Wallet connection already in progress, ignoring duplicate request');
+      return;
+    }
+    
     try {
+      // Set connecting flag to prevent duplicate requests
+      this.isConnecting = true;
+      
       // If there's an active session, verify it's still valid
       if (this.sessionTopic && this.signClient) {
         try {
@@ -2905,6 +2943,9 @@ class VimApp {
       errorMsg.className = 'text-red-500';
       this.buffer.appendChild(errorMsg);
       throw error;
+    } finally {
+      // Reset connecting flag
+      this.isConnecting = false;
     }
   }
 
@@ -2915,7 +2956,16 @@ class VimApp {
       return;
     }
 
+    // Prevent duplicate transaction executions
+    if (this.isConnecting) {
+      console.log('Connection already in progress, ignoring transaction execution');
+      return;
+    }
+
     try {
+      // Set connecting flag to prevent duplicate requests
+      this.isConnecting = true;
+      
       // Get signer account
       const signerAccount = this.signerAddress;
       if (!signerAccount) throw new Error('Failed to get signer account');
@@ -3092,6 +3142,9 @@ class VimApp {
         </div>
       `;
       this.buffer.appendChild(errorDiv);
+    } finally {
+      // Reset connecting flag
+      this.isConnecting = false;
     }
   }
 }
