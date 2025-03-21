@@ -4,10 +4,9 @@ import { ethers } from 'ethers';
 import { SignClient } from '@walletconnect/sign-client';
 import { SafeInfo, NetworkConfig, Token } from './types';
 import { truncateAddress, resolveEnsName, prepareTransactionRequest, calculateSafeTxHash, formatSafeSignatures, getSafeNonce, getSafeTxHashFromContract } from './utils';
-import { NETWORKS, DEFAULT_NETWORK, getNetworkConfig, COMMANDS, getContractAddress, getExplorerUrl } from './config';
+import { NETWORKS, DEFAULT_NETWORK, getNetworkConfig, getContractAddress, getExplorerUrl } from './config';
 import { SafeTxPool } from './managers/transactions';
 import { PriceOracle } from './services/oracle';
-import { Command } from './types/ui';
 import { HelpGuide } from './components/HelpGuide';
 
 class VimApp {

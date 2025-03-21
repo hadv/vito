@@ -1,4 +1,3 @@
-import { Command } from '../types/ui';
 import { COMMANDS } from '../config/commands';
 
 export class HelpGuide {
