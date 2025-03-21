@@ -14,6 +14,7 @@ import { getExplorerUrl } from './config/explorers';
 import { formatSafeSignatures } from './utils/signatures';
 import { PriceOracle } from './services/oracle';
 import { getSafeNonce, getSafeTxHashFromContract } from './utils/safe';
+import { Token } from './types/token';
 
 class VimApp {
   private buffer: HTMLDivElement;
@@ -2016,6 +2017,34 @@ class VimApp {
   }
 
   private async proposeToSafeTxPool(): Promise<void> {
+    console.log('Proposing transaction to SafeTxPool');
+    
+    if (!this.txFormData) {
+      console.error('No transaction data to propose');
+      return;
+    }
+    
+    // Log the txFormData being proposed
+    console.log('Proposing transaction with data:', JSON.stringify(this.txFormData));
+    
+    // Check if the data field is non-empty for ERC20 transfers
+    if (this.txFormData.data && this.txFormData.data.startsWith('0xa9059cbb')) {
+      console.log('This appears to be an ERC20 transfer. Decoded data:');
+      try {
+        const erc20Interface = new ethers.Interface([
+          "function transfer(address to, uint256 amount) returns (bool)"
+        ]);
+        const decoded = erc20Interface.parseTransaction({ data: this.txFormData.data });
+        if (decoded) {
+          console.log('Decoded transfer:', decoded);
+          console.log('  - To:', decoded.args[0]);
+          console.log('  - Amount:', decoded.args[1].toString());
+        }
+      } catch (error) {
+        console.error('Error decoding ERC20 transfer data:', error);
+      }
+    }
+    
     // Check both proposing and connecting flags 
     if (this._isProposing || this.isConnecting || !this.txFormData) {
       if (this.isConnecting) {
@@ -2475,6 +2504,8 @@ class VimApp {
     this.buffer.innerHTML = '';
     const container = document.createElement('div');
     container.className = 'max-w-2xl mx-auto bg-gray-800 p-6 rounded-lg border border-gray-700 shadow-lg space-y-4';
+    container.tabIndex = 0; // Make container focusable
+    container.id = 'safe-info-container';
 
     // Create title
     const title = document.createElement('h3');
@@ -2495,6 +2526,53 @@ class VimApp {
     ];
     
     const tabBodies: {[key: string]: HTMLDivElement} = {};
+    const tabButtons: HTMLButtonElement[] = [];
+    
+    // Function to switch tabs
+    const switchToTab = (tabIndex: number) => {
+      // Ensure index is within bounds
+      const index = Math.max(0, Math.min(tabIndex, tabs.length - 1));
+      
+      // Remove active class from all tabs
+      tabButtons.forEach(btn => {
+        btn.className = 'py-2 px-4 font-medium text-gray-400 hover:text-blue-300';
+      });
+      
+      // Hide all tab contents
+      Object.values(tabBodies).forEach(content => {
+        content.style.display = 'none';
+      });
+      
+      // Set active tab
+      tabButtons[index].className = 'py-2 px-4 font-medium text-blue-400 border-b-2 border-blue-400';
+      const tabId = tabs[index].id;
+      tabBodies[tabId].style.display = 'block';
+      
+      // If switching to the Assets tab, find and focus the token table
+      if (tabId === 'assets') {
+        // Use a short timeout to ensure DOM is updated before focusing
+        setTimeout(() => {
+          const tokenTable = document.getElementById('token-table');
+          if (tokenTable) {
+            console.log('Focusing token table from tab switch');
+            tokenTable.focus();
+            
+            // Also trigger the first row selection
+            const updateFocusFunction = (window as any).currentTokenTableUpdateFocus;
+            if (typeof updateFocusFunction === 'function') {
+              updateFocusFunction(0);
+            }
+          }
+        }, 100);
+      } else {
+        // When switching to non-Assets tab, ensure the container remains focused
+        setTimeout(() => {
+          // Re-focus the container to keep keyboard navigation working
+          container.focus();
+          console.log('Re-focusing container for tab:', tabId);
+        }, 50);
+      }
+    };
     
     // Create tab buttons
     tabs.forEach((tab, index) => {
@@ -2502,6 +2580,10 @@ class VimApp {
       tabButton.className = `py-2 px-4 font-medium ${index === 0 ? 'text-blue-400 border-b-2 border-blue-400' : 'text-gray-400 hover:text-blue-300'}`;
       tabButton.textContent = tab.label;
       tabButton.dataset.tab = tab.id;
+      tabButton.dataset.index = index.toString();
+      
+      // Store reference to button
+      tabButtons.push(tabButton);
       
       // Create tab content container
       const tabContent = document.createElement('div');
@@ -2512,24 +2594,40 @@ class VimApp {
       
       // Add click event
       tabButton.addEventListener('click', () => {
-        // Remove active class from all tabs
-        document.querySelectorAll('[data-tab]').forEach(t => {
-          (t as HTMLElement).className = 'py-2 px-4 font-medium text-gray-400 hover:text-blue-300';
-        });
-        
-        // Hide all tab contents
-        Object.values(tabBodies).forEach(content => {
-          content.style.display = 'none';
-        });
-        
-        // Set active tab
-        tabButton.className = 'py-2 px-4 font-medium text-blue-400 border-b-2 border-blue-400';
-        tabBodies[tab.id].style.display = 'block';
+        switchToTab(index);
+        // Focus the container after handling the click
+        setTimeout(() => container.focus(), 50);
       });
       
       tabsList.appendChild(tabButton);
     });
     
+    // Add keyboard navigation for tabs
+    container.addEventListener('keydown', (e) => {
+      // Get currently active tab index
+      const activeTabIndex = tabButtons.findIndex(btn => 
+        btn.className.includes('text-blue-400')
+      );
+      
+      if (e.key === 'ArrowRight') {
+        // Switch to next tab if possible
+        if (activeTabIndex < tabs.length - 1) {
+          switchToTab(activeTabIndex + 1);
+          e.preventDefault(); // Prevent default scrolling
+        }
+      } else if (e.key === 'ArrowLeft') {
+        // Switch to previous tab if possible
+        if (activeTabIndex > 0) {
+          switchToTab(activeTabIndex - 1);
+          e.preventDefault(); // Prevent default scrolling
+        }
+      }
+    });
+    
+    tabsContainer.appendChild(tabsList);
+    container.appendChild(tabsContainer);
+    
+    // Create the Info tab content
     tabsContainer.appendChild(tabsList);
     container.appendChild(tabsContainer);
     
@@ -2601,6 +2699,16 @@ class VimApp {
     
     // Fetch token balances
     this.fetchTokenBalances(assetsBox);
+    
+    // Focus the container immediately 
+    setTimeout(() => {
+      container.focus();
+      console.log('Initial focus on Safe info container');
+      
+      // Add subtle visual indicator for keyboard focus
+      container.style.outline = '2px solid #3b82f6';
+      container.style.outlineOffset = '2px';
+    }, 100);
   }
   
   // New method to fetch and display token balances
@@ -2630,47 +2738,94 @@ class VimApp {
       `;
       container.appendChild(title);
       
-      // Create table
-      const table = document.createElement('table');
-      table.className = 'w-full text-sm bg-gray-700 rounded-lg overflow-hidden';
+      // Create token list container with similar structure to tx table
+      const tokenTable = document.createElement('div');
+      tokenTable.id = 'token-table';
+      tokenTable.className = 'w-full text-sm bg-gray-800 rounded-lg overflow-hidden outline-none focus:ring-2 focus:ring-blue-500';
+      tokenTable.tabIndex = 0; // Make it focusable
       
-      // Create table header
-      const thead = document.createElement('thead');
-      thead.className = 'text-left text-gray-400 border-b border-gray-600 bg-gray-800';
-      thead.innerHTML = `
-        <tr>
-          <th class="py-2 px-4">Asset</th>
-          <th class="py-2 px-4 text-right">Balance</th>
-          <th class="py-2 px-4 text-right">Value</th>
-        </tr>
+      // Add focus styles to make it obvious when focused
+      tokenTable.addEventListener('focus', () => {
+        console.log('Token table focused');
+        // Add a highlighted border when focused - use the exact same style as pending tx screen
+        tokenTable.classList.add('ring-2', 'ring-blue-500');
+      });
+      
+      tokenTable.addEventListener('blur', () => {
+        console.log('Token table blurred');
+        // Remove styles when losing focus
+        tokenTable.classList.remove('ring-2', 'ring-blue-500');
+      });
+      
+      // Create header
+      const header = document.createElement('div');
+      header.className = 'grid grid-cols-3 text-left text-gray-400 border-b border-gray-600 bg-gray-800 p-3 font-medium';
+      header.innerHTML = `
+        <div>Asset</div>
+        <div class="text-right">Balance</div>
+        <div class="text-right">Value</div>
       `;
-      table.appendChild(thead);
-      
-      // Create table body
-      const tbody = document.createElement('tbody');
+      tokenTable.appendChild(header);
       
       // Get network specific ETH name directly from the network config
       const nativeCurrencyName = this.selectedNetwork.nativeTokenName;
       
-      // Add ETH balance row
-      const ethRow = document.createElement('tr');
-      ethRow.className = 'border-b border-gray-600 hover:bg-gray-750';
+      // Check if connected wallet is owner of the safe
+      const isOwner = this.signerAddress && this.cachedSafeInfo?.owners.some(
+        owner => owner.toLowerCase() === this.signerAddress?.toLowerCase()
+      );
       
-      // Get real-time ETH price from public oracle instead of using mock price
+      // Store token data for navigation
+      const tokenData: Token[] = [];
+      let currentFocusIndex = 0;
+      const self = this; // Reference to VimApp instance
+      
+      // Create ETH token object
+      const ethToken: Token = {
+        symbol: 'ETH',
+        name: nativeCurrencyName,
+        balanceFormatted: ethers.formatEther(ethBalance),
+        balance: ethBalance.toString(),
+        address: 'ETH', // Special case for ETH
+        decimals: 18
+      };
+      
+      // Get ETH price for USD value calculation
       const ethPrice = await PriceOracle.getEthPrice(this.provider);
-      const ethBalanceFormatted = ethers.formatEther(ethBalance);
-      const ethValueUsd = parseFloat(ethBalanceFormatted) * ethPrice;
+      ethToken.valueUsd = parseFloat(ethToken.balanceFormatted) * ethPrice;
       
-      ethRow.innerHTML = `
-        <td class="py-3 px-4">
-          <div class="flex items-center space-x-2">
-            <span class="text-white font-medium">${nativeCurrencyName}</span>
+      // Add ETH token to the data array
+      tokenData.push(ethToken);
+      
+      // Create ETH row (similar to transaction rows in pending tx screen)
+      const ethRow = document.createElement('div');
+      ethRow.setAttribute('data-token-address', 'ETH');
+      ethRow.className = 'border-b border-gray-700 hover:bg-gray-750 cursor-pointer transition-colors duration-150 ease-in-out';
+      
+      // Format ETH row content
+      const ethRowContent = document.createElement('div');
+      ethRowContent.className = 'grid grid-cols-3 p-3 items-center';
+      ethRowContent.innerHTML = `
+        <div class="flex items-center space-x-2">
+          <div class="p-1 rounded-full bg-blue-100">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M12 24C18.6274 24 24 18.6274 24 12C24 5.37258 18.6274 0 12 0C5.37258 0 0 5.37258 0 12C0 18.6274 5.37258 24 12 24Z" fill="#627EEA"/>
+              <path d="M12.3735 3V9.6525L17.9961 12.165L12.3735 3Z" fill="white" fill-opacity="0.602"/>
+              <path d="M12.3735 3L6.75 12.165L12.3735 9.6525V3Z" fill="white"/>
+              <path d="M12.3735 16.4759V20.9964L18 13.2119L12.3735 16.4759Z" fill="white" fill-opacity="0.602"/>
+              <path d="M12.3735 20.9964V16.4758L6.75 13.2119L12.3735 20.9964Z" fill="white"/>
+              <path d="M12.3735 15.4296L17.9961 12.1649L12.3735 9.65479V15.4296Z" fill="white" fill-opacity="0.2"/>
+              <path d="M6.75 12.1649L12.3735 15.4296V9.65479L6.75 12.1649Z" fill="white" fill-opacity="0.602"/>
+            </svg>
           </div>
-        </td>
-        <td class="py-3 px-4 text-right font-mono text-white">${ethBalanceFormatted} ETH</td>
-        <td class="py-3 px-4 text-right text-white">$${ethValueUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+          <span class="font-medium text-white">ETH</span>
+        </div>
+        <div class="text-right font-mono text-white">${ethToken.balanceFormatted} ETH</div>
+        <div class="text-right text-gray-300">$${ethToken.valueUsd ? ethToken.valueUsd.toFixed(2) : '0.00'}</div>
       `;
-      tbody.appendChild(ethRow);
+      
+      ethRow.appendChild(ethRowContent);
+      tokenTable.appendChild(ethRow);
       
       // Fetch ERC20 tokens from our token indexing service
       try {
@@ -2693,58 +2848,202 @@ class VimApp {
         
         // If no tokens were found, show a message
         if (tokens.length === 0) {
-          const noTokensRow = document.createElement('tr');
-          noTokensRow.innerHTML = `
-            <td colspan="3" class="py-4 px-4 text-center text-gray-400 italic">
-              No ERC20 tokens found for this address
-            </td>
-          `;
-          tbody.appendChild(noTokensRow);
+          const noTokensRow = document.createElement('div');
+          noTokensRow.className = 'p-4 text-center text-gray-400 italic';
+          noTokensRow.textContent = 'No ERC20 tokens found for this address';
+          tokenTable.appendChild(noTokensRow);
         } else {
           // Add rows for each token
-          tokens.forEach((token: {
-            symbol: string;
-            name: string;
-            balanceFormatted: string;
-            valueUsd: number | null;
-          }) => {
-            const tokenRow = document.createElement('tr');
-            tokenRow.className = 'border-b border-gray-600 hover:bg-gray-750';
+          tokens.forEach((token: Token) => {
+            // Add to token data array
+            tokenData.push(token);
+            
+            // Create token row
+            const tokenRow = document.createElement('div');
+            tokenRow.setAttribute('data-token-address', token.address);
+            tokenRow.className = 'border-b border-gray-700 hover:bg-gray-750 cursor-pointer transition-colors duration-150 ease-in-out';
+            
+            // Generate random color for token icon background
+            const colors = ['bg-red-100', 'bg-green-100', 'bg-blue-100', 'bg-yellow-100', 'bg-purple-100', 'bg-pink-100'];
+            const randomColor = colors[Math.floor(Math.random() * colors.length)];
             
             // Format value if available
-            const valueDisplay = token.valueUsd !== null
-              ? `$${token.valueUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-              : 'N/A';
+            const valueDisplay = token.valueUsd != null
+              ? `$${token.valueUsd.toFixed(2)}`
+              : '$0.00';
             
             tokenRow.innerHTML = `
-              <td class="py-3 px-4">
+              <div class="grid grid-cols-3 p-3 items-center">
                 <div class="flex items-center space-x-2">
-                  <span class="text-white font-medium">${token.symbol}</span>
-                  <span class="text-gray-400 text-xs">${token.name}</span>
+                  <div class="p-1 rounded-full ${randomColor}">
+                    <div class="w-6 h-6 flex items-center justify-center font-bold text-gray-800">
+                      ${token.symbol.charAt(0)}
+                    </div>
+                  </div>
+                  <span class="font-medium text-white">${token.symbol}</span>
                 </div>
-              </td>
-              <td class="py-3 px-4 text-right font-mono text-white">${token.balanceFormatted} ${token.symbol}</td>
-              <td class="py-3 px-4 text-right text-white">${valueDisplay}</td>
+                <div class="text-right font-mono text-white">${token.balanceFormatted} ${token.symbol}</div>
+                <div class="text-right text-gray-300">${valueDisplay}</div>
+              </div>
             `;
-            tbody.appendChild(tokenRow);
+            
+            tokenTable.appendChild(tokenRow);
           });
         }
       } catch (tokenError: unknown) {
         console.error('Error fetching ERC20 tokens:', tokenError);
         
         // Show error message for token fetch
-        const errorRow = document.createElement('tr');
-        const errorMessage = tokenError instanceof Error ? tokenError.message : 'Unknown error';
-        errorRow.innerHTML = `
-          <td colspan="3" class="py-4 px-4 text-center text-red-400">
-            Error fetching ERC20 tokens: ${errorMessage}
-          </td>
-        `;
-        tbody.appendChild(errorRow);
+        const errorRow = document.createElement('div');
+        errorRow.className = 'p-4 text-center text-red-400';
+        errorRow.textContent = tokenError instanceof Error ? tokenError.message : 'Unknown error fetching ERC20 tokens';
+        tokenTable.appendChild(errorRow);
       }
       
-      table.appendChild(tbody);
-      container.appendChild(table);
+      container.appendChild(tokenTable);
+      
+      // Add help text (similar to pending tx screen)
+      const helpText = document.createElement('p');
+      helpText.className = 'text-center text-gray-400 text-xs mt-4';
+      helpText.textContent = 'Use ↑/↓ keys to navigate, Enter to send token, : to enter command mode';
+      container.appendChild(helpText);
+      
+      // Function to update focus (similar to pending tx screen)
+      const updateFocus = (index: number) => {
+        console.log(`Updating focus to index ${index}`);
+        const rows = tokenTable.querySelectorAll('div[data-token-address]');
+        if (rows.length === 0) return;
+        
+        // Limit index to valid range
+        currentFocusIndex = Math.max(0, Math.min(index, rows.length - 1));
+        
+        // Remove active class from all rows
+        rows.forEach((row, i) => {
+          row.classList.remove('bg-gray-700', 'selected-token', 'border-l-4', 'border-l-blue-500');
+          
+          // Reset any modified padding
+          const content = row.querySelector('.grid');
+          if (content) {
+            content.classList.remove('pl-2');
+          }
+        });
+        
+        // Get the row to focus
+        const rowToFocus = rows[currentFocusIndex];
+        if (!rowToFocus) return;
+        
+        // Add very distinctive styling to the selected row - exactly like pending tx screen
+        rowToFocus.classList.add('bg-gray-700', 'selected-token', 'border-l-4', 'border-l-blue-500');
+        
+        // Adjust padding for the content to account for the border
+        const content = rowToFocus.querySelector('.grid');
+        if (content) {
+          content.classList.add('pl-2');
+        }
+        
+        // Make sure the focused row is visible
+        rowToFocus.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        
+        console.log(`Focus updated to token at index ${currentFocusIndex}`);
+      };
+      
+      // Make updateFocus globally accessible for tab switching
+      (window as any).currentTokenTableUpdateFocus = updateFocus;
+      
+      // Add keyboard navigation (similar to pending tx screen)
+      tokenTable.addEventListener('keydown', (e: KeyboardEvent) => {
+        const totalTokens = tokenData.length;
+        console.log('Token table keydown:', e.key); // Debug logging
+        
+        switch (e.key) {
+          case 'ArrowUp':
+            e.preventDefault();
+            if (currentFocusIndex > 0) {
+              updateFocus(currentFocusIndex - 1);
+            }
+            break;
+            
+          case 'ArrowDown':
+            e.preventDefault();
+            if (currentFocusIndex < totalTokens - 1) {
+              updateFocus(currentFocusIndex + 1);
+            }
+            break;
+            
+          case 'Enter':
+            e.preventDefault();
+            // Only allow token sending if user is an owner
+            if (isOwner) {
+              const token = tokenData[currentFocusIndex];
+              if (token) {
+                // Highlight the selected row with more prominent styling
+                const selectedRow = tokenTable.querySelectorAll('div[data-token-address]')[currentFocusIndex];
+                if (selectedRow) {
+                  // Ensure the row stays selected
+                  tokenTable.querySelectorAll('div[data-token-address]').forEach(row => {
+                    row.classList.remove('bg-gray-700', 'selected-token');
+                  });
+                  selectedRow.classList.add('bg-gray-700', 'selected-token');
+                }
+                
+                // Show token sending screen
+                self.showTokenSendingScreen(token);
+              }
+            }
+            break;
+            
+          case ':':
+            e.preventDefault();
+            // Focus the command input when colon is pressed
+            if (self.commandInput) {
+              self.commandInput.focus();
+              // Prepopulate with colon
+              self.commandInput.value = ':';
+              // Set cursor position after the colon
+              self.commandInput.setSelectionRange(1, 1);
+            }
+            break;
+        }
+      });
+      
+      // Add click handlers for rows
+      const rows = tokenTable.querySelectorAll('div[data-token-address]');
+      rows.forEach((row, index) => {
+        row.addEventListener('click', () => {
+          // First explicitly focus the token table
+          console.log('Token row clicked, focusing table');
+          tokenTable.focus();
+          
+          // Update focus with animation to make it obvious
+          updateFocus(index);
+          
+          // If owner, handle double-click separately
+          if (isOwner) {
+            // Track clicks for double-click detection
+            const now = new Date().getTime();
+            const lastClick = (row as any)._lastClickTime || 0;
+            (row as any)._lastClickTime = now;
+            
+            // If double click (within 300ms), show token sending screen
+            if (now - lastClick < 300) {
+              console.log('Double click detected, showing token sending screen');
+              const token = tokenData[index];
+              if (token) {
+                self.showTokenSendingScreen(token);
+              }
+            }
+          }
+        });
+      });
+      
+      // Set initial focus
+      setTimeout(() => {
+        console.log('Setting initial focus on token table');
+        // Add obvious focus styles to the token table
+        tokenTable.style.outline = '2px solid #3b82f6';
+        tokenTable.focus({preventScroll: false});
+        updateFocus(0);
+      }, 100);
       
     } catch (error: unknown) {
       console.error('Error fetching token balances:', error);
@@ -3145,6 +3444,457 @@ class VimApp {
     } finally {
       // Reset connecting flag
       this.isConnecting = false;
+    }
+  }
+
+  /**
+   * Shows the token sending screen for a specific token
+   * @param token The token to send (with ETH as a special case)
+   */
+  private showTokenSendingScreen(token: Token): void {
+    console.log('Showing token sending screen for:', token);
+    console.log(`Token decimals: ${token.decimals}, Raw balance: ${token.balance}, Formatted balance: ${token.balanceFormatted}`);
+    
+    // Check that the token has the decimal property
+    if (token.decimals === undefined) {
+      console.error('⚠️ ERROR: Token decimals information is missing!');
+    } else {
+      console.log(`Token decimals verification passed: ${token.decimals}`);
+      
+      // Verify that the balance parsing works correctly
+      try {
+        const testParse = ethers.parseUnits(token.balanceFormatted.replace(/,/g, ''), token.decimals);
+        console.log(`Test parsing the token balance: ${testParse.toString()}`);
+      } catch (error) {
+        console.error('Error test parsing token balance:', error);
+      }
+    }
+    
+    // Clear existing content
+    this.buffer.innerHTML = '';
+    this.buffer.className = 'flex-1 p-4 overflow-y-auto';
+
+    // Create transaction form container
+    const formContainer = document.createElement('div');
+    formContainer.className = 'max-w-2xl mx-auto bg-gray-800 p-6 rounded-lg border border-gray-700 shadow-lg';
+
+    // Create form title with token info
+    const title = document.createElement('h3');
+    title.className = 'text-xl font-bold text-white mb-2';
+    title.textContent = `Send ${token.symbol}`;
+    
+    // Add token info subtitle
+    const subtitle = document.createElement('p');
+    subtitle.className = 'text-gray-400 text-sm mb-6';
+    subtitle.textContent = `Balance: ${token.balanceFormatted} ${token.symbol}`;
+
+    // Create form
+    const form = document.createElement('form');
+    form.className = 'space-y-6';
+    form.id = 'token-send-form';
+    form.onsubmit = (e) => e.preventDefault();
+
+    // Initialize txFormData based on token type
+    const isEth = token.address === 'ETH';
+    if (isEth) {
+      // For ETH, we'll set the recipient and value
+      this.txFormData = { to: '', value: '', data: '0x' };
+    } else {
+      // For ERC20, we'll call the token contract with transfer() function
+      this.txFormData = { to: token.address, value: '0', data: '' };
+      console.log('Initialized ERC20 transfer data structure');
+      
+      // Verify that ERC20 token decimal information is available
+      if (token.decimals === undefined) {
+        console.warn('Token decimals information is missing!');
+      }
+    }
+    
+    // Define fields for the token transfer form
+    const fields = [
+      {
+        id: 'tx-to',
+        label: 'To Address',
+        type: 'combo',
+        placeholder: '0x...',
+        required: true
+      },
+      {
+        id: 'tx-amount',
+        label: `Amount (${token.symbol})`,
+        type: 'text',
+        placeholder: '0.0',
+        required: true
+      }
+    ];
+
+    // Create fields in the form
+    fields.forEach(field => {
+      const fieldContainer = document.createElement('div');
+      fieldContainer.className = 'relative';
+
+      const label = document.createElement('label');
+      label.htmlFor = field.id;
+      label.className = 'block text-sm font-medium text-gray-300 mb-1';
+      label.textContent = field.label;
+
+      let input: HTMLInputElement;
+      if (field.type === 'combo') {
+        // Create input for address entry with custom dropdown
+        input = document.createElement('input');
+        input.type = 'text';
+        input.id = field.id;
+        input.className = 'block w-full rounded-md border-0 py-1.5 text-white shadow-sm ring-1 ring-inset ring-gray-700 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-blue-600 sm:text-sm sm:leading-6 bg-gray-700';
+        input.placeholder = field.placeholder;
+        if (field.required) input.required = true;
+
+        // Create custom dropdown container
+        const dropdownContainer = document.createElement('div');
+        dropdownContainer.className = 'absolute z-10 mt-1 w-full overflow-auto rounded-md bg-gray-800 py-1 text-base shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none sm:text-sm hidden';
+        
+        // Add owner options if available
+        if (this.cachedSafeInfo && this.cachedSafeInfo.owners.length > 0) {
+          this.cachedSafeInfo.owners.forEach(owner => {
+            const option = document.createElement('div');
+            option.className = 'relative cursor-pointer select-none py-2 pl-3 pr-9 text-gray-300 hover:bg-gray-700 hover:text-white text-left';
+            option.textContent = owner;
+            
+            option.addEventListener('click', () => {
+              input.value = owner;
+              if (isEth) {
+                this.txFormData!.to = owner; // For ETH, recipient is the to field
+              } else {
+                // For ERC20, we need to update the transfer call data
+                this.updateERC20TransferData(token.address, owner, 
+                  (document.getElementById('tx-amount') as HTMLInputElement)?.value || '0', 
+                  token.decimals);
+              }
+              dropdownContainer.classList.add('hidden');
+            });
+            
+            dropdownContainer.appendChild(option);
+          });
+        }
+
+        // Add input event listener to update txFormData and show/hide dropdown
+        input.addEventListener('input', () => {
+          const toAddress = input.value;
+          if (isEth) {
+            this.txFormData!.to = toAddress; // For ETH, recipient is the to field
+          } else {
+            // For ERC20, we need to update the transfer call data
+            this.updateERC20TransferData(token.address, toAddress, 
+              (document.getElementById('tx-amount') as HTMLInputElement)?.value || '0', 
+              token.decimals);
+          }
+          dropdownContainer.classList.remove('hidden');
+        });
+
+        // Other event handlers...
+        // Add focus/blur handlers for dropdown
+        input.addEventListener('focus', () => {
+          dropdownContainer.classList.remove('hidden');
+        });
+
+        // Close dropdown when clicking outside
+        document.addEventListener('click', (e) => {
+          if (!input.contains(e.target as Node) && !dropdownContainer.contains(e.target as Node)) {
+            dropdownContainer.classList.add('hidden');
+          }
+        });
+
+        // Add keydown event listener for navigation
+        const vimApp = this; // Capture VimApp instance
+        input.addEventListener('keydown', function(this: HTMLElement, e: Event) {
+          const keyEvent = e as KeyboardEvent;
+          if (keyEvent.key === ':') {
+            e.preventDefault();
+            e.stopPropagation();
+            (document.getElementById('command-input') as HTMLInputElement)?.focus();
+            (window as any).vimApp.command = ':';
+            (window as any).vimApp.updateStatus();
+          } else if (keyEvent.key === 'ArrowDown' || keyEvent.key === 'ArrowUp') {
+            e.preventDefault();
+            const options = dropdownContainer.children;
+            const currentIndex = Array.from(options).findIndex(opt => opt.classList.contains('bg-gray-700'));
+            
+            if (keyEvent.key === 'ArrowDown') {
+              const nextIndex = currentIndex < options.length - 1 ? currentIndex + 1 : 0;
+              options[currentIndex]?.classList.remove('bg-gray-700');
+              options[nextIndex]?.classList.add('bg-gray-700');
+            } else {
+              const prevIndex = currentIndex > 0 ? currentIndex - 1 : options.length - 1;
+              options[currentIndex]?.classList.remove('bg-gray-700');
+              options[prevIndex]?.classList.add('bg-gray-700');
+            }
+          } else if (keyEvent.key === 'Enter') {
+            e.preventDefault();
+            const selectedOption = dropdownContainer.querySelector('.bg-gray-700');
+            if (selectedOption) {
+              input.value = selectedOption.textContent || '';
+              const toAddress = input.value;
+              if (isEth) {
+                vimApp.txFormData!.to = toAddress; // For ETH, recipient is the to field
+              } else {
+                // For ERC20, we need to update the transfer call data
+                vimApp.updateERC20TransferData(token.address, toAddress, 
+                  (document.getElementById('tx-amount') as HTMLInputElement)?.value || '0', 
+                  token.decimals);
+              }
+              dropdownContainer.classList.add('hidden');
+            }
+          } else if (keyEvent.key === 'Escape') {
+            dropdownContainer.classList.add('hidden');
+          }
+        });
+
+        // Create a wrapper div for better styling
+        const inputWrapper = document.createElement('div');
+        inputWrapper.className = 'relative w-full';
+        inputWrapper.appendChild(input);
+        inputWrapper.appendChild(dropdownContainer);
+
+        fieldContainer.appendChild(label);
+        fieldContainer.appendChild(inputWrapper);
+      } else {
+        // For regular text inputs
+        input = document.createElement('input');
+        input.type = 'text';
+        input.id = field.id;
+        input.className = 'w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent';
+        input.placeholder = field.placeholder;
+        if (field.required) input.required = true;
+
+        // For amount field, add max button
+        if (field.id === 'tx-amount') {
+          const inputGroup = document.createElement('div');
+          inputGroup.className = 'flex';
+          
+          // Debug the input with an ID for easy reference
+          input.dataset.debug = 'amount-input';
+          
+          const maxButton = document.createElement('button');
+          maxButton.type = 'button';
+          maxButton.className = 'px-3 py-2 ml-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md';
+          maxButton.textContent = 'MAX';
+          maxButton.onclick = () => {
+            // Set the maximum available balance
+            console.log(`Setting MAX amount: ${token.balanceFormatted} ${token.symbol} (raw balance: ${token.balance}, decimals: ${token.decimals})`);
+            
+            // Ensure we use a clean value without formatting for the input
+            const cleanValue = token.balanceFormatted.replace(/,/g, '');
+            input.value = cleanValue;
+            console.log(`Set amount input value to MAX: "${input.value}"`);
+            
+            // Update txFormData based on token type
+            if (isEth) {
+              // For ETH, use the value directly
+              console.log(`Setting ETH value to MAX: ${input.value}`);
+              this.txFormData!.value = input.value;
+            } else {
+              // For ERC20, update the transfer data
+              const toAddress = (document.getElementById('tx-to') as HTMLInputElement)?.value || '';
+              console.log(`Setting ERC20 transfer with MAX amount: "${cleanValue}" (${token.decimals} decimals)`);
+              
+              // Use cleanValue directly instead of reading from input.value
+              this.updateERC20TransferData(token.address, toAddress, cleanValue, token.decimals);
+              
+              // Verify the data was set
+              console.log(`After MAX: txFormData.data = ${this.txFormData?.data}`);
+            }
+          };
+          
+          inputGroup.appendChild(input);
+          inputGroup.appendChild(maxButton);
+          
+          fieldContainer.appendChild(label);
+          fieldContainer.appendChild(inputGroup);
+        } else {
+          fieldContainer.appendChild(label);
+          fieldContainer.appendChild(input);
+        }
+        
+        // Add input event listener to update txFormData in real-time
+        input.addEventListener('input', () => {
+          if (field.id === 'tx-to') {
+            const toAddress = input.value;
+            if (isEth) {
+              this.txFormData!.to = toAddress; // For ETH, recipient is the to field
+            } else {
+              // For ERC20, update the transfer data
+              const amountInput = document.getElementById('tx-amount') as HTMLInputElement;
+              const amount = amountInput?.value || '';
+              console.log(`Recipient updated - using amount: "${amount}" for tx data`);
+              this.updateERC20TransferData(token.address, toAddress, amount, token.decimals);
+              console.log(`After to update: txFormData.data = ${this.txFormData?.data}`);
+            }
+          } else if (field.id === 'tx-amount') {
+            // Store the current value directly from the event
+            const currentAmountValue = input.value;
+            console.log(`Amount input changed to: "${currentAmountValue}" (using direct value from event)`);
+            
+            if (isEth) {
+              // For ETH, use the value directly
+              this.txFormData!.value = currentAmountValue;
+            } else {
+              // For ERC20, update the transfer data
+              const toAddress = (document.getElementById('tx-to') as HTMLInputElement)?.value || '';
+              console.log(`Amount changed: Updating ERC20 data with "${currentAmountValue}" (decimals: ${token.decimals})`);
+              
+              // Use the current value directly rather than re-reading from the DOM
+              this.updateERC20TransferData(token.address, toAddress, currentAmountValue, token.decimals);
+              console.log(`After amount update: txFormData.data = ${this.txFormData?.data}`);
+            }
+          }
+        });
+
+        // Add keydown event listener for : key
+        input.addEventListener('keydown', function(this: HTMLElement, e: Event) {
+          const keyEvent = e as KeyboardEvent;
+          if (keyEvent.key === ':') {
+            e.preventDefault();
+            e.stopPropagation();
+            (document.getElementById('command-input') as HTMLInputElement)?.focus();
+            (window as any).vimApp.command = ':';
+            (window as any).vimApp.updateStatus();
+          }
+        });
+      }
+
+      if (field.type !== 'combo') {
+        form.appendChild(fieldContainer);
+      } else {
+        form.appendChild(fieldContainer);
+      }
+    });
+
+    // Add detailed help text to explain the difference between ETH and ERC20 tokens
+    const helperText = document.createElement('p');
+    helperText.className = 'mt-6 text-sm text-gray-400';
+    helperText.textContent = 'Fill in the recipient address and amount, then use :p command to propose the transaction.';
+    
+    // Add token-specific info
+    const tokenInfoText = document.createElement('div');
+    tokenInfoText.className = 'mt-4 text-sm text-gray-500 p-3 bg-gray-900 rounded-md';
+    
+    if (isEth) {
+      tokenInfoText.innerHTML = `
+        <p class="font-medium text-blue-400">Native ETH Transfer</p>
+        <p class="mt-1">This will create a direct ETH transfer from your Safe to the recipient.</p>
+      `;
+    } else {
+      tokenInfoText.innerHTML = `
+        <p class="font-medium text-green-400">ERC20 Token Transfer</p>
+        <p class="mt-1">This will call the <code class="bg-gray-800 px-1 rounded">transfer()</code> function on the ${token.symbol} token contract at address:</p>
+        <p class="mt-1 font-mono text-xs break-all">${token.address}</p>
+      `;
+    }
+
+    // Assemble the form
+    formContainer.appendChild(title);
+    formContainer.appendChild(subtitle);
+    formContainer.appendChild(form);
+    form.appendChild(helperText);
+    form.appendChild(tokenInfoText);
+    
+    this.buffer.appendChild(formContainer);
+    
+    console.log(`Token sending screen set up for ${isEth ? 'ETH' : 'ERC20'} token: ${token.symbol}`);
+  }
+  
+  /**
+   * Helper method to update txFormData with ERC20 transfer function data
+   */
+  private updateERC20TransferData(tokenAddress: string, to: string, amount: string, decimals: number): void {
+    console.log(`[DATA UPDATE] Updating ERC20 transfer data:`);
+    console.log(`  - Token: ${tokenAddress}`);
+    console.log(`  - To: ${to}`);
+    console.log(`  - Amount (raw): "${amount}"`);
+    console.log(`  - Decimals: ${decimals}`);
+    
+    if (!to) {
+      console.log('Missing to address, cannot update ERC20 transfer data');
+      return;
+    }
+    
+    try {
+      // Create ERC20 interface
+      const erc20Interface = new ethers.Interface([
+        "function transfer(address to, uint256 amount) returns (bool)"
+      ]);
+      
+      // Parse the amount with the correct number of decimals
+      let parsedAmount;
+      
+      // Properly sanitize the input amount
+      const sanitizedAmount = amount.trim().replace(/,/g, '');
+      console.log(`Sanitized amount: "${sanitizedAmount}"`);
+      
+      if (!sanitizedAmount || sanitizedAmount === '') {
+        console.log('Empty amount, defaulting to zero');
+        parsedAmount = 0n;
+      } else {
+        try {
+          console.log(`Attempting to parse amount "${sanitizedAmount}" with ${decimals} decimals`);
+          
+          // Parse using ethers parseUnits with proper decimal precision for the token
+          parsedAmount = ethers.parseUnits(sanitizedAmount, decimals);
+          console.log(`Successfully parsed amount: ${parsedAmount.toString()}`);
+          
+          // Verify the parsed amount by formatting it back for debugging
+          const formattedBack = ethers.formatUnits(parsedAmount, decimals);
+          console.log(`Parsed amount formatted back: ${formattedBack}`);
+        } catch (parseError) {
+          console.error('Error parsing token amount:', parseError);
+          
+          // Try alternative parsing approaches
+          if (sanitizedAmount.includes('.')) {
+            // Handle decimal numbers
+            try {
+              // Extract parts before and after decimal
+              const [wholePart, decimalPart = ''] = sanitizedAmount.split('.');
+              console.log(`Trying alternative parsing: whole=${wholePart}, decimal=${decimalPart}`);
+              
+              // Construct a properly formatted decimal string
+              const paddedDecimal = decimalPart.padEnd(decimals, '0').substring(0, decimals);
+              const wholeNumber = wholePart === '' ? '0' : wholePart;
+              console.log(`Padded decimal: ${wholeNumber}.${paddedDecimal}`);
+              
+              // Try parsing again with the properly formatted number
+              parsedAmount = ethers.parseUnits(`${wholeNumber}.${paddedDecimal}`, decimals);
+              console.log(`Alternative parsing successful: ${parsedAmount.toString()}`);
+            } catch (altError) {
+              console.error('Alternative parsing also failed:', altError);
+              // Let it be 0 after all attempts failed, but log error
+              parsedAmount = 0n;
+            }
+          } else {
+            // For integers (no decimal)
+            try {
+              // Try parsing as a whole number
+              parsedAmount = BigInt(sanitizedAmount) * (10n ** BigInt(decimals));
+              console.log(`Parsed as integer: ${parsedAmount.toString()}`);
+            } catch (intError) {
+              console.error('Integer parsing failed:', intError);
+              parsedAmount = 0n;
+            }
+          }
+        }
+      }
+      
+      // Encode the transfer function call with the properly parsed amount
+      const data = erc20Interface.encodeFunctionData("transfer", [to, parsedAmount]);
+      console.log(`Encoded ERC20 transfer data: ${data}`);
+      
+      // Update txFormData
+      this.txFormData!.to = tokenAddress;
+      this.txFormData!.value = "0"; 
+      this.txFormData!.data = data;
+      
+      // Log the transaction data for debugging
+      console.log('Final txFormData:', JSON.stringify(this.txFormData));
+    } catch (error) {
+      console.error('Error encoding ERC20 transfer:', error);
     }
   }
 }
