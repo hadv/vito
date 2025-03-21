@@ -2,19 +2,11 @@ import QRCode from 'qrcode';
 import { io, Socket } from 'socket.io-client';
 import { ethers } from 'ethers';
 import { SignClient } from '@walletconnect/sign-client';
-import { SafeInfo } from './types/safe';
-import { NetworkConfig } from './types/network';
-import { truncateAddress, resolveEnsName } from './utils/address';
-import { NETWORKS, DEFAULT_NETWORK, getNetworkConfig } from './config/networks';
-import { COMMANDS } from './config/commands';
-import { getContractAddress } from './config/contracts';
+import { SafeInfo, NetworkConfig, Token } from './types';
+import { truncateAddress, resolveEnsName, prepareTransactionRequest, calculateSafeTxHash, formatSafeSignatures, getSafeNonce, getSafeTxHashFromContract } from './utils';
+import { NETWORKS, DEFAULT_NETWORK, getNetworkConfig, COMMANDS, getContractAddress, getExplorerUrl } from './config';
 import { SafeTxPool } from './managers/transactions';
-import { prepareTransactionRequest, calculateSafeTxHash } from './utils/transaction';
-import { getExplorerUrl } from './config/explorers';
-import { formatSafeSignatures } from './utils/signatures';
 import { PriceOracle } from './services/oracle';
-import { getSafeNonce, getSafeTxHashFromContract } from './utils/safe';
-import { Token } from './types/token';
 
 class VimApp {
   private buffer: HTMLDivElement;
