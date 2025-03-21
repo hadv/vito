@@ -7,7 +7,7 @@ import { truncateAddress, resolveEnsName, prepareTransactionRequest, calculateSa
 import { NETWORKS, DEFAULT_NETWORK, getNetworkConfig, getContractAddress, getExplorerUrl } from './config';
 import { SafeTxPool } from './managers/transactions';
 import { PriceOracle } from './services/oracle';
-import { HelpGuide } from './components/HelpGuide';
+import { HelpGuide } from './components';
 
 class VimApp {
   private buffer: HTMLDivElement;
