@@ -4,9 +4,10 @@ import { ethers } from 'ethers';
 import { SignClient } from '@walletconnect/sign-client';
 import { SafeInfo, NetworkConfig, Token } from './types';
 import { truncateAddress, resolveEnsName, prepareTransactionRequest, calculateSafeTxHash, formatSafeSignatures, getSafeNonce, getSafeTxHashFromContract } from './utils';
-import { NETWORKS, DEFAULT_NETWORK, getNetworkConfig, COMMANDS, getContractAddress, getExplorerUrl } from './config';
+import { NETWORKS, DEFAULT_NETWORK, getNetworkConfig, getContractAddress, getExplorerUrl } from './config';
 import { SafeTxPool } from './managers/transactions';
 import { PriceOracle } from './services/oracle';
+import { HelpGuide } from './components';
 
 class VimApp {
   private buffer: HTMLDivElement;
@@ -39,6 +40,7 @@ class VimApp {
   } | null = null;
   private _isProposing: boolean = false;
   private selectedTxHash: string | null = null; // Add this property to store selected transaction hash
+  private helpGuide: HelpGuide;
 
   constructor() {
     this.buffer = document.getElementById('buffer') as HTMLDivElement;
@@ -53,6 +55,14 @@ class VimApp {
     this.signerAddressDisplay = document.getElementById('signer-address-display') as HTMLSpanElement;
     this.commandInput = document.getElementById('command-input') as HTMLInputElement;
 
+    // Initialize HelpGuide component
+    this.helpGuide = new HelpGuide(
+      this.helpContainer,
+      this.helpScreen,
+      this.mainContent,
+      this.buffer
+    );
+    
     // Check if command input exists
     if (!this.commandInput) {
       console.error('Command input element not found');
@@ -280,85 +290,7 @@ class VimApp {
   }
 
   private showHelpGuide(): void {
-    this.helpContainer.innerHTML = '';
-    this.helpScreen.innerHTML = '';
-
-    // Create main container with responsive spacing
-    const mainContainer = document.createElement('div');
-    mainContainer.className = 'space-y-4 sm:space-y-6';
-
-    // Mode Switching Box
-    const modeBox = document.createElement('div');
-    modeBox.className = 'bg-[#2c2c2c] p-4 rounded-lg border border-gray-700 shadow-lg';
-
-    const modeLabel = document.createElement('h3');
-    modeLabel.className = 'text-gray-400 text-xs font-medium mb-2';
-    modeLabel.textContent = 'Mode Switching';
-
-    const modeList = document.createElement('ul');
-    modeList.className = 'space-y-2';
-    
-    const modes = [
-      { key: 'e', desc: 'Switch to TX mode (requires connected wallet via :wc)' },
-      { key: 'ESC', desc: 'Return to READ ONLY mode' }
-    ];
-
-    modes.forEach(({ key, desc }) => {
-      const modeItem = document.createElement('li');
-      modeItem.className = 'text-gray-300 text-xs flex items-center gap-2';
-      modeItem.innerHTML = `
-        <span class="text-blue-400 font-medium w-8">${key}</span>
-        <span class="text-gray-400">${desc}</span>
-      `;
-      modeList.appendChild(modeItem);
-    });
-
-    modeBox.appendChild(modeLabel);
-    modeBox.appendChild(modeList);
-    mainContainer.appendChild(modeBox);
-
-    // Commands Box
-    const commandsBox = document.createElement('div');
-    commandsBox.className = 'bg-[#2c2c2c] p-4 rounded-lg border border-gray-700 shadow-lg';
-
-    const commandsLabel = document.createElement('h3');
-    commandsLabel.className = 'text-gray-400 text-xs font-medium mb-2';
-    commandsLabel.textContent = 'Commands';
-
-    const commandsList = document.createElement('ul');
-    commandsList.className = 'space-y-2';
-
-    COMMANDS.forEach(({ cmd, desc }) => {
-      const commandItem = document.createElement('li');
-      commandItem.className = 'text-gray-300 text-xs flex items-center gap-2';
-      commandItem.innerHTML = `
-        <span class="text-blue-400 font-medium w-8">${cmd}</span>
-        <span class="text-gray-400">${desc}</span>
-      `;
-      commandsList.appendChild(commandItem);
-    });
-
-    commandsBox.appendChild(commandsLabel);
-    commandsBox.appendChild(commandsList);
-    mainContainer.appendChild(commandsBox);
-
-    if (this.inputContainer) {
-      // If input field is visible, show help in help-container
-      this.helpContainer.appendChild(mainContainer);
-      this.helpContainer.classList.remove('hidden');
-      this.mainContent.classList.remove('hidden');
-      this.buffer.classList.remove('hidden');
-      this.helpScreen.classList.add('hidden');
-      
-      // Update help container classes
-      this.helpContainer.className = 'w-full sm:w-1/2 p-4';
-    } else {
-      // If input field is not visible, show help in help-screen
-      this.helpScreen.appendChild(mainContainer);
-      this.helpScreen.classList.remove('hidden');
-      this.mainContent.classList.add('hidden');
-      this.buffer.classList.add('hidden');
-    }
+    this.helpGuide.show();
   }
 
   private async connectWallet(safeAddress: string): Promise<void> {
