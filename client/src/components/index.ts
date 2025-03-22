@@ -1,1 +1,2 @@
-export * from './HelpGuide'; 
+export * from './HelpGuide';
+export * from './SafeInfoDisplay'; 
