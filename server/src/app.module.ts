@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { SafeModule } from './safe/safe.module';
 import { TokenModule } from './token/token.module';
+import { TransactionModule } from './transaction/transaction.module';
 
 @Module({
   imports: [
@@ -11,6 +12,7 @@ import { TokenModule } from './token/token.module';
     }),
     SafeModule,
     TokenModule,
+    TransactionModule,
   ],
 })
 export class AppModule {}

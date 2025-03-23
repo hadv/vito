@@ -97,3 +97,47 @@ Nest is an MIT-licensed open source project. It can grow thanks to the sponsors 
 ## License
 
 Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+
+## Environment Variables
+
+This application uses environment variables for configuration. Create a `.env` file in the root directory with the following variables:
+
+```
+# Application configuration
+PORT=3000
+
+# Wallet Connect
+WALLETCONNECT_PROJECT_ID=your_walletconnect_project_id
+
+# Alchemy API
+ALCHEMY_API_KEY=your_alchemy_api_key
+
+# RPC URLs
+MAINNET_RPC_URL=https://eth.llamarpc.com
+GOERLI_RPC_URL=https://ethereum-goerli.publicnode.com
+SEPOLIA_RPC_URL=https://ethereum-sepolia.publicnode.com
+
+# Etherscan API keys
+ETHERSCAN_API_KEY_MAINNET=your_etherscan_api_key
+ETHERSCAN_API_KEY_GOERLI=your_etherscan_api_key
+ETHERSCAN_API_KEY_SEPOLIA=your_etherscan_api_key
+ETHERSCAN_API_KEY_POLYGON=your_polygonscan_api_key
+ETHERSCAN_API_KEY_MUMBAI=your_polygonscan_api_key
+ETHERSCAN_API_KEY_OPTIMISM=your_optimism_etherscan_api_key
+ETHERSCAN_API_KEY_BASE=your_basescan_api_key
+ETHERSCAN_API_KEY_GNOSIS=your_gnosisscan_api_key
+```
+
+You can find a template in the `.env.example` file.
+
+### Etherscan API Keys
+
+To fetch blockchain transactions, you need to obtain API keys from Etherscan and related block explorers:
+
+1. Ethereum (Mainnet, Goerli, Sepolia): [Etherscan API Key](https://etherscan.io/myapikey)
+2. Polygon (Mainnet, Mumbai): [Polygonscan API Key](https://polygonscan.com/myapikey)
+3. Optimism: [Optimistic Etherscan API Key](https://optimistic.etherscan.io/myapikey)
+4. Base: [Basescan API Key](https://basescan.org/myapikey)
+5. Gnosis: [Gnosisscan API Key](https://gnosisscan.io/myapikey)
+
+Register for free accounts on each platform to obtain the API keys.

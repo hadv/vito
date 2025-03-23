@@ -2,12 +2,13 @@ import QRCode from 'qrcode';
 import { io, Socket } from 'socket.io-client';
 import { ethers } from 'ethers';
 import { SignClient } from '@walletconnect/sign-client';
-import { SafeInfo, NetworkConfig, Token } from './types';
+import { SafeInfo, NetworkConfig, Token, BlockchainTransaction } from './types';
 import { truncateAddress, resolveEnsName, prepareTransactionRequest, calculateSafeTxHash, formatSafeSignatures, getSafeNonce, getSafeTxHashFromContract } from './utils';
 import { NETWORKS, DEFAULT_NETWORK, getNetworkConfig, getContractAddress, getExplorerUrl } from './config';
 import { SafeTxPool } from './managers/transactions';
 import { PriceOracle } from './services/oracle';
-import { HelpGuide } from './components';
+import { TransactionService } from './services/transaction';
+import { HelpGuide, TransactionHistory } from './components';
 
 class VimApp {
   private buffer: HTMLDivElement;
@@ -41,6 +42,9 @@ class VimApp {
   private _isProposing: boolean = false;
   private selectedTxHash: string | null = null; // Add this property to store selected transaction hash
   private helpGuide: HelpGuide;
+  private transactionService = new TransactionService();
+  private transactionPage = 0;
+  private transactionHistory: TransactionHistory | null = null;
 
   constructor() {
     this.buffer = document.getElementById('buffer') as HTMLDivElement;
@@ -611,6 +615,11 @@ class VimApp {
     }
     e.preventDefault();
     this.updateStatus();
+
+    if (this.command === ':his') {
+      await this.showTransactionHistoryScreen();
+      return;
+    }
   }
 
   private async executeCommand(): Promise<void> {
@@ -1721,9 +1730,20 @@ class VimApp {
       await this.executeSelectedTransaction();
     } else if (this.command === ':h') {
       this.showHelpGuide();
+    } else if (this.command === ':his') {
+      if (!this.safeAddress) {
+        const errorMsg = document.createElement('div');
+        errorMsg.className = 'error-message p-4 text-red-500';
+        errorMsg.textContent = 'No Safe wallet connected. Please connect a wallet first with :connect <address>';
+        this.buffer.innerHTML = '';
+        this.buffer.appendChild(errorMsg);
+        return;
+      }
+      
+      await this.showTransactionHistoryScreen();
     } else {
       this.buffer.textContent = `Unknown command: ${this.command}`;
-      this.buffer.className = 'flex-1 p-4 overflow-y-auto text-yellow-400';
+      this.buffer.className = 'flex-1 p-4 overflow-y-auto text-red-500';
     }
   }
 
@@ -2842,7 +2862,7 @@ class VimApp {
         currentFocusIndex = Math.max(0, Math.min(index, rows.length - 1));
         
         // Remove active class from all rows
-        rows.forEach((row, i) => {
+        rows.forEach(row => {
           row.classList.remove('bg-gray-700', 'selected-token', 'border-l-4', 'border-l-blue-500');
           
           // Reset any modified padding
@@ -3336,8 +3356,7 @@ class VimApp {
           <a href="${txExplorerUrl}" target="_blank" class="inline-flex items-center gap-1 text-green-400 hover:text-green-300 transition-colors">
             <span>View on Explorer</span>
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
-            </svg>
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg>
           </a>
         </div>
       `;
@@ -3821,6 +3840,84 @@ class VimApp {
       console.error('Error encoding ERC20 transfer:', error);
     }
   }
+
+  /**
+   * Shows the transaction history screen for the connected Safe wallet
+   */
+  private async showTransactionHistoryScreen(): Promise<void> {
+    if (!this.safeAddress) {
+      const errorMsg = document.createElement('div');
+      errorMsg.className = 'error-message p-4 text-red-500';
+      errorMsg.textContent = 'No Safe wallet connected. Please connect a wallet first with :c <address>';
+      this.buffer.innerHTML = '';
+      this.buffer.appendChild(errorMsg);
+      return;
+    }
+
+    // Initialize the transaction history component if not already done
+    if (!this.transactionHistory) {
+      this.transactionHistory = new TransactionHistory(
+        this.buffer,
+        this.safeAddress,
+        this.selectedNetwork,
+        this.transactionService
+      );
+    } else {
+      // Update safeAddress and selectedNetwork in case they changed
+      this.transactionHistory = new TransactionHistory(
+        this.buffer,
+        this.safeAddress,
+        this.selectedNetwork,
+        this.transactionService
+      );
+      // Set the page to the same one as before
+      this.transactionHistory.setPage(this.transactionPage);
+    }
+
+    // Render the transaction history
+    await this.transactionHistory.render(
+      // Back button callback
+      () => {
+        this.command = ':i';
+        this.executeCommand();
+      },
+      // Transaction select callback
+      (tx: BlockchainTransaction) => {
+        this.showTransactionDetails(tx);
+      }
+    );
+
+    // Save the current page for future reference
+    this.transactionPage = this.transactionHistory.getPage();
+  }
+
+  /**
+   * Shows detailed information about a specific transaction
+   */
+  private showTransactionDetails(tx: BlockchainTransaction): void {
+    // Initialize transaction history component if not already done
+    if (!this.transactionHistory) {
+      this.transactionHistory = new TransactionHistory(
+        this.buffer,
+        this.safeAddress || '',
+        this.selectedNetwork,
+        this.transactionService
+      );
+    }
+
+    // Show transaction details using the component
+    this.transactionHistory.showTransactionDetails(
+      tx,
+      // Back button callback - go back to transaction list
+      () => this.showTransactionHistoryScreen(),
+      // Execute transaction callback
+      (txHash: string) => {
+        this.selectedTxHash = txHash;
+        this.executeSelectedTransaction();
+      }
+    );
+  }
 }
 
 export default VimApp;
+  

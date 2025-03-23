@@ -13,4 +13,5 @@ export const COMMANDS: Command[] = [
   { cmd: ':p', desc: 'Propose transaction to SafeTxPool' },
   { cmd: ':del', desc: 'Delete selected pending transaction' },
   { cmd: ':e', desc: 'Execute selected pending transaction' },
+  { cmd: ':his', desc: 'View transaction history for the connected Safe wallet' },
 ]; 
