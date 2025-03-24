@@ -25,6 +25,7 @@ export interface BlockchainTransaction {
   value: string;
   nonce: number;
   to: string;
+  from?: string;
   data: string;
   operation: number;
   safeTxHash: string;
@@ -45,4 +46,19 @@ export interface BlockchainTransaction {
       value: any;
     }>;
   };
+  tokenInfo?: {
+    address: string;
+    symbol: string;
+    decimals: number;
+    name: string;
+  };
+  stateChanges?: {
+    tokenAddress: string;
+    tokenSymbol: string;
+    tokenDecimals: number;
+    from: string;
+    to: string;
+    value: string;
+    isStateChange: boolean;
+  }[];
 } 
