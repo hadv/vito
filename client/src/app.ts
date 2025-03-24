@@ -3908,8 +3908,6 @@ class VimApp {
     // Show transaction details using the component
     this.transactionHistory.showTransactionDetails(
       tx,
-      // Back button callback - go back to transaction list
-      () => this.showTransactionHistoryScreen(),
       // Execute transaction callback
       (txHash: string) => {
         this.selectedTxHash = txHash;
