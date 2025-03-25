@@ -50,10 +50,17 @@ export class GeminiModelService implements AIModelService {
       value: string;
       data?: string;
       timestamp: number;
+      internalTransactions?: Array<{
+        from: string;
+        to: string;
+        value: string;
+        data?: string;
+      }>;
     },
     context?: {
       previousTransactions?: any[];
       accountInfo?: any;
+      safeAddress?: string;
     }
   ): Promise<TransactionAnalysisResult> {
     try {
@@ -72,15 +79,23 @@ export class GeminiModelService implements AIModelService {
         };
       }
       
-      // SPAM TOKEN DETECTION
-      const isZeroValueTokenTransfer = transactionData.data?.includes('0xa9059cbb') && transactionData.value === '0';
+      // SPAM TOKEN DETECTION - Refined for Safe wallet transactions
+      // Note: Safe wallets commonly have legitimate 0 ETH value transactions for contract calls
+      const isLikelySpamToken = transactionData.data?.includes('0xa9059cbb') && 
+                               transactionData.value === '0' && 
+                               (!context?.safeAddress || // Not from a known Safe wallet
+                                transactionData.data.includes('spam') || // Contains explicit spam indicators
+                                transactionData.data.includes('airdrop'));
+      
       const hasSpamKeywords = transactionData.data && (
         transactionData.data.toLowerCase().includes('airdrop') ||
         transactionData.data.toLowerCase().includes('claim') ||
-        (transactionData.data.toLowerCase().includes('mint') && transactionData.value === '0')
+        (transactionData.data.toLowerCase().includes('mint') && 
+         transactionData.value === '0' && 
+         !transactionData.data.toLowerCase().includes('multisig')) // Exclude multisig operations
       );
       
-      if (isZeroValueTokenTransfer || hasSpamKeywords) {
+      if (isLikelySpamToken || hasSpamKeywords) {
         return {
           isMalicious: true,
           confidence: 0.9,
@@ -88,94 +103,225 @@ export class GeminiModelService implements AIModelService {
         };
       }
 
+      // Check if we have any internal transactions to analyze
+      const hasInternalTxs = transactionData.internalTransactions && 
+                            transactionData.internalTransactions.length > 0;
+      
+      // Prepare internal transaction summary for the main prompt
+      let internalTxSummary = "";
+      if (hasInternalTxs) {
+        const relevantInternalTxs = transactionData.internalTransactions!
+          .filter(tx => 
+            // Only analyze internal txs related to the safe wallet
+            context?.safeAddress && 
+            (tx.from.toLowerCase() === context.safeAddress.toLowerCase() || 
+             tx.to.toLowerCase() === context.safeAddress.toLowerCase())
+          );
+        
+        if (relevantInternalTxs.length > 0) {
+          internalTxSummary = "Internal Transactions:\n" + 
+            relevantInternalTxs.map((tx, idx) => 
+              `${idx+1}. From: ${tx.from} To: ${tx.to} Value: ${tx.value}`
+            ).join("\n");
+        }
+      }
+
       // SIMPLIFIED PROMPT - More direct instructions
       const prompt = `
-You are analyzing blockchain transactions to identify malicious activity. THIS IS SECURITY CRITICAL.
+You are analyzing blockchain transactions to identify malicious activity.
 
-ATTENTION: By default, you should consider transactions suspicious unless they are clearly legitimate.
+IMPORTANT: This is a Safe (formerly Gnosis Safe) smart contract wallet transaction. Safe wallets commonly have:
+- 0 ETH value transactions for contract calls, which are typically legitimate
+- Multiple internal transactions as part of normal multisig operations
+- Contract interactions that are part of normal wallet operation
 
-Transaction details:
+Main transaction details:
 - From: ${transactionData.from || 'Unknown'}
 - To: ${transactionData.to || 'Unknown'}
 - Value: ${transactionData.value || '0'}
 - Data: ${transactionData.data?.substring(0, 200) || 'No data'}
 
-Classify this as MALICIOUS if it shows ANY of these patterns:
-1. Unsolicited token transfers or airdrops (especially with 0 ETH value)
-2. Requests for token approvals
-3. Interactions with unverified contracts
-4. High-value transfers to unknown addresses
-5. Smart contract calls that could drain funds
-6. Phishing attempts through token interactions
-7. Any transaction that seems unusual or suspicious
-8. Worthless token transfers (spam tokens)
+${internalTxSummary}
 
-Return ONLY a valid JSON with this format:
+Classify this as MALICIOUS only if it shows obvious suspicious patterns such as:
+1. Unsolicited token transfers or airdrops that are clearly not requested by the user
+2. Unusual or excessive approval requests (especially for all tokens)
+3. Interactions with known scam contracts
+4. Unusual transfers to previously unused addresses
+5. Contract calls that appear to drain funds
+6. Phishing attempts via token approvals
+7. Spam tokens with no legitimate use case
+
+For Safe wallets, do NOT flag normal operations like:
+- Regular contract interactions with 0 ETH value
+- Multisig transaction executions
+- Token transfers initiated by the wallet owner
+- DeFi protocol interactions
+
+FORMAT INSTRUCTIONS:
+- Return ONLY a raw JSON object without markdown formatting (no \`\`\` tags)
+- Do not include any explanation text before or after the JSON object
+- Use exactly this format:
+
 {
-  "isMalicious": boolean,
-  "confidence": number,
-  "reason": "string"
+  "isMalicious": false,
+  "confidence": 0.5,
+  "reason": "your analysis reason here"
 }
       `;
 
-      // Make the API request
-      const result = await this.model.generateContent(prompt);
-      const response = await result.response;
-      const text = response.text().trim();
+      // Make the API request with retry logic
+      let text;
+      let retryCount = 0;
+      const maxRetries = 2;
       
-      // Override for testing - log raw response
+      while (retryCount <= maxRetries) {
+        try {
+          const result = await this.model.generateContent(prompt);
+          const response = await result.response;
+          text = response.text().trim();
+          
+          // Check for common patterns that indicate a valid response
+          const hasJsonBlock = text.includes('```json') && text.includes('```');
+          const hasJsonObject = text.includes('{') && text.includes('}');
+          
+          if (hasJsonObject || hasJsonBlock) {
+            break; // Got what seems to be valid JSON, exit retry loop
+          }
+          
+          // If we're here, the response doesn't look like JSON
+          console.log(`Attempt ${retryCount + 1}: Response doesn't contain JSON, retrying...`);
+          retryCount++;
+          
+          if (retryCount <= maxRetries) {
+            // Wait a bit before retrying
+            await new Promise(resolve => setTimeout(resolve, 1000));
+          }
+        } catch (error) {
+          console.error(`API request error on attempt ${retryCount + 1}:`, error);
+          retryCount++;
+          
+          if (retryCount <= maxRetries) {
+            // Wait a bit before retrying
+            await new Promise(resolve => setTimeout(resolve, 1000));
+          } else {
+            // Max retries reached, propagate the error
+            throw error;
+          }
+        }
+      }
+      
+      // Log raw response for debugging
       console.log("Raw Gemini response:", text);
 
-      // Try several approaches to extract valid JSON
+      // First, analyze main transaction
+      let mainAnalysis: TransactionAnalysisResult;
+      
+      // Extract and parse the JSON response
       try {
-        // First attempt: Try parsing the entire response as JSON
-        const parsedJson = JSON.parse(text);
-        console.log("Success parsing JSON directly:", parsedJson);
+        // Clean the response to handle formatting issues
+        let cleanedText = text;
+        
+        // Remove markdown code blocks if present (```json...```)
+        if (cleanedText.includes('```')) {
+          // This regex extracts content between markdown code fences
+          const codeBlockMatch = cleanedText.match(/```(?:json)?\n?([\s\S]*?)```/);
+          if (codeBlockMatch && codeBlockMatch[1]) {
+            cleanedText = codeBlockMatch[1].trim();
+          } else {
+            // Fallback: just remove the markdown markers
+            cleanedText = cleanedText.replace(/```json|```/g, '').trim();
+          }
+        }
+        
+        // If still no clean JSON, extract anything between { and }
+        if (!cleanedText.startsWith('{') || !cleanedText.endsWith('}')) {
+          const jsonMatch = cleanedText.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            cleanedText = jsonMatch[0].trim();
+          }
+        }
+        
+        console.log("Cleaned JSON text:", cleanedText);
+        
+        // Try parsing the cleaned JSON
+        const parsedJson = JSON.parse(cleanedText);
+        console.log("Successfully parsed JSON:", parsedJson);
         
         // Return the actual AI analysis
-        return {
+        mainAnalysis = {
           isMalicious: Boolean(parsedJson.isMalicious),
           confidence: Number(parsedJson.confidence) || 0.5,
           reason: parsedJson.reason || "Analysis completed based on transaction properties."
         };
       } catch (parseError) {
-        console.log("First parse attempt failed, trying to extract JSON from text");
+        console.error("Failed to parse JSON response:", parseError);
         
-        // Second attempt: Try to extract JSON using regex
-        const jsonMatch = text.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          try {
-            const extractedJson = JSON.parse(jsonMatch[0]);
-            console.log("Extracted JSON via regex:", extractedJson);
-            
-            return {
-              isMalicious: Boolean(extractedJson.isMalicious),
-              confidence: Number(extractedJson.confidence) || 0.5,
-              reason: extractedJson.reason || "Analysis completed based on transaction data."
-            };
-          } catch (innerParseError) {
-            console.error("Failed to parse extracted JSON:", innerParseError);
-          }
-        }
-        
-        // Third attempt: If we can't parse JSON, look for indications in the text
-        console.error("JSON extraction failed, analyzing raw text");
-        const lowerText = text.toLowerCase();
-        const isMalicious = lowerText.includes('malicious') || 
-                           lowerText.includes('suspicious') || 
-                           lowerText.includes('spam') || 
-                           lowerText.includes('phishing') ||
-                           lowerText.includes('risk') ||
-                           lowerText.includes('harmful') ||
-                           lowerText.includes('scam');
-        
-        return {
-          isMalicious: isMalicious,
-          confidence: 0.6,
-          reason: "Based on text analysis, transaction " + 
-                 (isMalicious ? "shows suspicious patterns." : "appears legitimate.")
+        // If we can't parse JSON at all, default to non-malicious for Safe wallet transactions
+        // This is safer than falsely flagging legitimate transactions
+        mainAnalysis = {
+          isMalicious: false,
+          confidence: 0.3,
+          reason: "Unable to analyze transaction due to AI model response format issues. Treating as legitimate transaction."
         };
       }
+      
+      // Now, analyze any internal transactions if present and add them to the result
+      if (hasInternalTxs && context?.safeAddress) {
+        const relevantInternalTxs = transactionData.internalTransactions!.filter(tx => 
+          tx.from.toLowerCase() === context.safeAddress!.toLowerCase() || 
+          tx.to.toLowerCase() === context.safeAddress!.toLowerCase()
+        );
+        
+        if (relevantInternalTxs.length > 0) {
+          // If any internal tx is to a known suspicious address, mark it immediately
+          const internalAnalysis = relevantInternalTxs.map(tx => {
+            // Check if this internal tx is to/from a suspicious address
+            const isToSuspicious = suspiciousAddresses.includes(tx.to.toLowerCase());
+            const isFromSuspicious = suspiciousAddresses.includes(tx.from.toLowerCase());
+            
+            if (isToSuspicious || isFromSuspicious) {
+              return {
+                isMalicious: true,
+                confidence: 0.95,
+                reason: `Internal transaction ${isToSuspicious ? 'to' : 'from'} a known suspicious address.`,
+                transaction: {
+                  from: tx.from,
+                  to: tx.to,
+                  value: tx.value
+                }
+              };
+            }
+            
+            // Otherwise, inherit the main transaction's analysis for simplicity
+            // In a production system, you might want to analyze each internal tx separately
+            return {
+              isMalicious: mainAnalysis.isMalicious,
+              confidence: mainAnalysis.confidence,
+              reason: `Internal transaction associated with ${mainAnalysis.isMalicious ? 'suspicious' : 'legitimate'} main transaction.`,
+              transaction: {
+                from: tx.from,
+                to: tx.to,
+                value: tx.value
+              }
+            };
+          });
+          
+          // Add internal transaction analysis to the result
+          mainAnalysis.internalTransactions = internalAnalysis;
+          
+          // If any internal transaction is malicious, the whole transaction should be considered malicious
+          const anyInternalMalicious = internalAnalysis.some(tx => tx.isMalicious);
+          if (anyInternalMalicious && !mainAnalysis.isMalicious) {
+            mainAnalysis.isMalicious = true;
+            mainAnalysis.confidence = Math.max(...internalAnalysis.map(tx => tx.confidence));
+            mainAnalysis.reason = "Transaction contains suspicious internal operations.";
+          }
+        }
+      }
+      
+      return mainAnalysis;
+      
     } catch (error) {
       console.error('Error analyzing transaction with Gemini:', error);
       // When there's an error calling the LLM model, ignore the analysis and display the transaction as normal

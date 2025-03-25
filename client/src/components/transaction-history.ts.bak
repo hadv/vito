@@ -1,0 +1,677 @@
+import { BlockchainTransaction } from '../types';
+import { ethers } from 'ethers';
+
+/**
+ * Helper function to truncate address for display
+ */
+const truncateAddress = (address: string): string => {
+  if (!address || address.length < 10) return address || '';
+  return `${address.substring(0, 6)}...${address.substring(address.length - 4)}`;
+};
+
+/**
+ * Helper function to format token value based on decimals
+ */
+const formatTokenValue = (value: string, decimals: number): string => {
+  try {
+    // Convert from wei/token base units to token amount
+    const formatted = ethers.formatUnits(value, decimals);
+    // Remove trailing zeros
+    return formatted.replace(/\.?0+$/, '');
+  } catch (error) {
+    console.warn('Error formatting token value:', error);
+    return value;
+  }
+};
+
+/**
+ * TransactionHistory component for displaying a list of blockchain transactions
+ */
+export class TransactionHistory {
+  private buffer: HTMLDivElement;
+  private transactionPage = 0;
+  private transactionsPerPage = 10;
+  private selectedNetwork: { chainId: number; blockExplorer?: string };
+  private safeAddress: string;
+  private transactionService: any; // Will be properly typed in constructor
+  private selectedRowIndex = 0; // Keep track of the currently selected row
+  private transactions: BlockchainTransaction[] = []; // Store transactions for keyboard navigation
+  private keyboardListener: ((e: KeyboardEvent) => void) | null = null; // Store keyboard event listener
+  private onTransactionSelectCallback: ((tx: BlockchainTransaction) => void) | null = null; // Callback for transaction selection
+  private onBackClickCallback: (() => void) | null = null; // Callback for back button
+  private isDetailsView = false; // Whether we're in the details view or list view
+  // Flag to prevent multiple renders when returning from details
+  private isReturningFromDetails = false;
+  // Store callbacks for different navigation paths
+  private goToWalletInfoCallback: (() => void) | null = null; // Callback to return to wallet info screen
+  // Filter flags for malicious transactions
+  private excludeMalicious = false;
+
+  /**
+   * Creates a new TransactionHistory component
+   * @param buffer The HTML element to render the component in
+   * @param safeAddress The Safe wallet address
+   * @param selectedNetwork The selected network configuration
+   * @param transactionService The transaction service to use for fetching transactions
+   */
+  constructor(
+    buffer: HTMLDivElement, 
+    safeAddress: string,
+    selectedNetwork: { chainId: number; blockExplorer?: string },
+    transactionService: any
+  ) {
+    this.buffer = buffer;
+    this.safeAddress = safeAddress;
+    this.selectedNetwork = selectedNetwork;
+    this.transactionService = transactionService;
+  }
+
+  /**
+   * Gets the etherscan URL for a transaction hash
+   * @param chainId The chain ID
+   * @param hash The transaction hash
+   * @param isTx Whether the hash is a transaction (true) or address (false)
+   * @returns The etherscan URL
+   */
+  private getEtherscanUrl(chainId: number, hash: string, isTx: boolean = true): string {
+    // Map of chain IDs to Etherscan URLs
+    const etherscanUrls: Record<number, string> = {
+      1: 'https://etherscan.io',
+      5: 'https://goerli.etherscan.io',
+      11155111: 'https://sepolia.etherscan.io',
+      137: 'https://polygonscan.com',
+      80001: 'https://mumbai.polygonscan.com',
+      8453: 'https://basescan.org',
+      100: 'https://gnosisscan.io',
+      10: 'https://optimistic.etherscan.io',
+    };
+    
+    const baseUrl = etherscanUrls[chainId] || this.selectedNetwork.blockExplorer;
+    if (!baseUrl) return '#';
+    
+    return `${baseUrl}/${isTx ? 'tx' : 'address'}/${hash}`;
+  }
+
+  /**
+   * Renders the transaction history screen
+   */
+  public async render(
+    onBackClick: () => void,
+    onTransactionSelect: (tx: BlockchainTransaction) => void
+  ): Promise<void> {
+    // This is the callback to go back to wallet info screen
+    // Store it separately from the transaction list navigation
+    this.goToWalletInfoCallback = onBackClick;
+    
+    // Store callbacks if they are valid (not null)
+    if (onTransactionSelect) {
+      this.onTransactionSelectCallback = onTransactionSelect;
+    }
+    
+    // If we're not returning from details, set up normal navigation
+    if (!this.isReturningFromDetails) {
+      this.onBackClickCallback = onBackClick;
+    } else {
+      // We're returning from details, just reset the flag
+      this.isReturningFromDetails = false;
+    }
+    
+    this.isDetailsView = false;
+    
+    // Remove any existing keyboard listener
+    this.removeKeyboardListener();
+
+    if (!this.safeAddress) {
+      const errorMsg = document.createElement('div');
+      errorMsg.className = 'error-message p-4 text-red-500';
+      errorMsg.textContent = 'No Safe wallet connected. Please connect a wallet first with :c <address>';
+      this.buffer.innerHTML = '';
+      this.buffer.appendChild(errorMsg);
+      return;
+    }
+
+    // Clear the buffer
+    this.buffer.innerHTML = '';
+    
+    // Create container for the transaction history
+    const container = document.createElement('div');
+    container.className = 'max-w-4xl mx-auto';
+    container.tabIndex = -1;
+
+    // Create title and filter controls in the same row
+    const titleBar = document.createElement('div');
+    titleBar.className = 'flex justify-between items-center mb-4';
+    
+    const titleDiv = document.createElement('div');
+    
+    const title = document.createElement('h2');
+    title.className = 'text-xl font-bold text-gray-300';
+    title.textContent = 'Blockchain Transactions';
+    titleDiv.appendChild(title);
+    
+    // Create filter controls
+    const filterControls = document.createElement('div');
+    filterControls.className = 'flex items-center space-x-2';
+    
+    const filterLabel = document.createElement('span');
+    filterLabel.className = 'text-sm text-gray-400';
+    filterLabel.textContent = 'Hide malicious:';
+    filterControls.appendChild(filterLabel);
+    
+    const toggleSwitch = document.createElement('label');
+    toggleSwitch.className = 'relative inline-flex items-center cursor-pointer';
+    toggleSwitch.innerHTML = `
+      <input type="checkbox" value="" class="sr-only peer" id="malicious-toggle">
+      <div class="w-11 h-6 bg-gray-700 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+    `;
+    filterControls.appendChild(toggleSwitch);
+    
+    // Set up toggle event
+    const toggleCheckbox = toggleSwitch.querySelector('#malicious-toggle') as HTMLInputElement;
+    toggleCheckbox.checked = this.excludeMalicious;
+    toggleCheckbox.addEventListener('change', async () => {
+      this.excludeMalicious = toggleCheckbox.checked;
+      this.transactionPage = 0; // Reset to first page when filtering changes
+      await this.render(this.goToWalletInfoCallback!, this.onTransactionSelectCallback!);
+      
+      // After rendering, make sure the checkbox state is correctly set
+      const updatedToggle = document.querySelector('#malicious-toggle') as HTMLInputElement;
+      if (updatedToggle) {
+        updatedToggle.checked = this.excludeMalicious;
+      }
+    });
+    
+    titleBar.appendChild(titleDiv);
+    titleBar.appendChild(filterControls);
+    container.appendChild(titleBar);
+
+    // Create description
+    const description = document.createElement('p');
+    description.className = 'text-sm text-gray-400 mb-6';
+    description.textContent = 'Showing all blockchain transactions related to this Safe wallet address.';
+    container.appendChild(description);
+
+    // Create loading indicator
+    const loadingIndicator = document.createElement('div');
+    loadingIndicator.className = 'my-8 text-center text-gray-500';
+    loadingIndicator.textContent = 'Loading transactions...';
+    container.appendChild(loadingIndicator);
+
+    // Add container to buffer
+    this.buffer.appendChild(container);
+
+    try {
+      // Get chain ID from selected network
+      const chainId = this.selectedNetwork.chainId;
+      
+      // Fetch transactions
+      const transactions = await this.transactionService.getSafeTransactions(
+        this.safeAddress,
+        chainId,
+        this.transactionsPerPage,
+        this.transactionPage * this.transactionsPerPage
+      );
+
+      // Filter transactions if needed
+      const filteredTransactions = this.excludeMalicious 
+        ? transactions.filter((tx: BlockchainTransaction) => !tx.analysis?.isMalicious)
+        : transactions;
+
+      // Store transactions for keyboard navigation
+      this.transactions = filteredTransactions;
+      this.selectedRowIndex = 0; // Reset selection when loading transactions
+
+      // Remove loading indicator
+      container.removeChild(loadingIndicator);
+
+      if (filteredTransactions.length === 0) {
+        // If we're on a page > 0 and there are no transactions, go back to previous page
+        if (this.transactionPage > 0 && !this.excludeMalicious) {
+          this.transactionPage--;
+          // Re-render with the previous page
+          await this.render(this.goToWalletInfoCallback!, this.onTransactionSelectCallback!);
+          return;
+        }
+
+        const noTxMessage = document.createElement('div');
+        noTxMessage.className = 'text-center py-8 text-gray-500 bg-gray-800 rounded-lg border border-gray-700 shadow-lg p-6';
+        noTxMessage.textContent = this.excludeMalicious 
+          ? 'No normal transactions found for this Safe wallet address' 
+          : 'No blockchain transactions found for this Safe wallet address';
+        container.appendChild(noTxMessage);
+        
+        // Add back button for empty state
+        const backButton = document.createElement('button');
+        backButton.className = 'mt-6 px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded transition-colors';
+        backButton.textContent = 'Back to Safe Info';
+        backButton.addEventListener('click', () => {
+          if (this.goToWalletInfoCallback) {
+            this.goToWalletInfoCallback();
+          }
+        });
+        container.appendChild(backButton);
+        return;
+      }
+
+      // Create transactions table
+      const table = document.createElement('table');
+      table.className = 'min-w-full bg-gray-800 rounded-lg border border-gray-700 shadow-lg overflow-hidden';
+      table.id = 'transaction-table';
+      
+      // Create table header
+      const thead = document.createElement('thead');
+      thead.className = 'bg-gray-900 border-b border-gray-700';
+      thead.innerHTML = `
+        <tr>
+          <th class="py-3 px-4 text-left text-xs font-medium text-gray-400">Date</th>
+          <th class="py-3 px-4 text-left text-xs font-medium text-gray-400">Hash</th>
+          <th class="py-3 px-4 text-left text-xs font-medium text-gray-400">State Changes</th>
+          <th class="py-3 px-4 text-left text-xs font-medium text-gray-400">Security</th>
+        </tr>
+      `;
+      table.appendChild(thead);
+      
+      // Create table body
+      const tbody = document.createElement('tbody');
+      
+      filteredTransactions.forEach((tx: BlockchainTransaction, index: number) => {
+        const tr = document.createElement('tr');
+        
+        // Add malicious transaction highlight if detected
+        if (tx.analysis?.isMalicious) {
+          tr.classList.add('bg-red-900/30', 'hover:bg-red-800/50');
+        } else {
+          tr.className = index % 2 === 0 ? 'bg-gray-800' : 'bg-gray-800/50';
+          tr.classList.add('hover:bg-gray-700/50');
+        }
+        
+        tr.classList.add('cursor-pointer', 'border-b', 'border-gray-700');
+        // Make each row focusable
+        tr.tabIndex = 0;
+        tr.dataset.index = index.toString();
+        tr.dataset.txHash = tx.txHash || tx.safeTxHash;
+        
+        // Format date
+        const date = new Date(tx.timestamp * 1000);
+        const formattedDate = date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
+        
+        // Get etherscan URL
+        const txHash = tx.executedTxHash || tx.txHash || tx.safeTxHash;
+        const etherscanUrl = this.getEtherscanUrl(this.selectedNetwork.chainId, txHash);
+        
+        // Generate state changes content
+        let stateChangesHTML = '';
+        
+        if (tx.stateChanges && tx.stateChanges.length > 0) {
+          // Filter state changes to only show those related to safe wallet
+          // AND filter out 0 value ETH transactions (for multisig executions)
+          const relevantChanges = tx.stateChanges.filter(change => 
+            (change.from.toLowerCase() === this.safeAddress.toLowerCase() || 
+             change.to.toLowerCase() === this.safeAddress.toLowerCase()) &&
+            // Filter out native currency (ETH) transactions with 0 value
+            !(change.tokenAddress === '0x0000000000000000000000000000000000000000' && 
+              (change.value === '0' || change.value === '0x0' || parseInt(change.value, 16) === 0))
+          );
+          
+          if (relevantChanges.length === 0) {
+            stateChangesHTML = '<span class="text-gray-500">No relevant state changes</span>';
+          } else {
+            stateChangesHTML = relevantChanges.map(change => {
+              const isOutgoing = change.from.toLowerCase() === this.safeAddress.toLowerCase();
+              const directionClass = isOutgoing ? 'text-red-400' : 'text-green-400';
+              const formattedValue = formatTokenValue(change.value, change.tokenDecimals);
+              
+              return `
+                <div class="flex items-center py-1 ${directionClass}">
+                  ${isOutgoing ? 
+                    '<svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 11l5-5m0 0l5 5m-5-5v12"></path></svg>' : 
+                    '<svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 13l-5 5m0 0l-5-5m5 5V6"></path></svg>'
+                  }
+                  ${formattedValue} ${change.tokenSymbol}
+                  ${isOutgoing ? 
+                    `<span class="text-xs ml-1">to ${truncateAddress(change.to)}</span>` : 
+                    `<span class="text-xs ml-1">from ${truncateAddress(change.from)}</span>`
+                  }
+                </div>
+              `;
+            }).join('');
+          }
+        } else {
+          stateChangesHTML = '<span class="text-gray-500">No state changes</span>';
+        }
+        
+        // Generate analysis content for security column
+        let securityHTML = '';
+        if (tx.analysis) {
+          const securityClass = tx.analysis.isMalicious 
+            ? 'text-red-400' 
+            : tx.analysis.confidence > 0.3 
+              ? 'text-yellow-400' 
+              : 'text-green-400';
+          
+          const warningIcon = tx.analysis.isMalicious 
+            ? '<svg class="w-5 h-5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>' 
+            : '';
+          
+          const confidencePercent = Math.round(tx.analysis.confidence * 100);
+          
+          securityHTML = `
+            <div class="flex items-center ${securityClass}">
+              ${warningIcon}
+              ${tx.analysis.isMalicious ? 'Malicious' : 'Safe'} 
+              <span class="text-xs ml-2">(${confidencePercent}% confidence)</span>
+            </div>
+            <div class="text-xs text-gray-400 mt-1 truncate max-w-xs" title="${tx.analysis.reason}">
+              ${tx.analysis.reason.length > 60 ? tx.analysis.reason.substring(0, 60) + '...' : tx.analysis.reason}
+            </div>
+          `;
+        } else {
+          securityHTML = '<span class="text-gray-500">Not analyzed</span>';
+        }
+        
+        tr.innerHTML = `
+          <td class="py-3 px-4 text-sm text-gray-300">${formattedDate}</td>
+          <td class="py-3 px-4 text-sm font-mono">
+            <a href="${etherscanUrl}" target="_blank" rel="noopener noreferrer" class="text-blue-400 hover:text-blue-300" onclick="event.stopPropagation();">
+              ${truncateAddress(txHash)}
+              <svg class="inline-block w-3 h-3 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path>
+              </svg>
+            </a>
+          </td>
+          <td class="py-3 px-4 text-sm">${stateChangesHTML}</td>
+          <td class="py-3 px-4 text-sm">${securityHTML}</td>
+        `;
+        
+        // Set up the transaction row click event with the right page tracking
+        this.setupTransactionRowClick(tx, index, tr);
+        
+        tbody.appendChild(tr);
+      });
+      
+      table.appendChild(tbody);
+      container.appendChild(table);
+      
+      // Create pagination controls
+      const paginationContainer = document.createElement('div');
+      paginationContainer.className = 'flex justify-between items-center mt-4 text-sm';
+      
+      const prevButton = document.createElement('button');
+      prevButton.className = 'px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded transition-colors';
+      prevButton.textContent = 'Previous';
+      prevButton.disabled = this.transactionPage === 0;
+      if (prevButton.disabled) {
+        prevButton.classList.add('opacity-50', 'cursor-not-allowed');
+      }
+      prevButton.addEventListener('click', async () => {
+        if (this.transactionPage > 0) {
+          this.transactionPage--;
+          // Use consistent callbacks
+          await this.render(this.goToWalletInfoCallback!, this.onTransactionSelectCallback!);
+        }
+      });
+      
+      const pageInfo = document.createElement('span');
+      pageInfo.className = 'text-gray-400';
+      pageInfo.textContent = `Page ${this.transactionPage + 1}`;
+      
+      const nextButton = document.createElement('button');
+      nextButton.className = 'px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded transition-colors';
+      nextButton.textContent = 'Next';
+      
+      // Fix for pagination issue when hiding malicious transactions
+      // When filtering malicious transactions, we need to check if we received
+      // the maximum number of transactions we requested, not just the filtered count
+      const fetchedMaxTransactions = filteredTransactions.length === this.transactionsPerPage;
+      nextButton.disabled = !fetchedMaxTransactions;
+      
+      if (nextButton.disabled) {
+        nextButton.classList.add('opacity-50', 'cursor-not-allowed');
+      }
+      nextButton.addEventListener('click', async () => {
+        if (fetchedMaxTransactions) {
+          this.transactionPage++;
+          // Store the current filter state when changing pages
+          const currentExcludeMalicious = this.excludeMalicious;
+          // Use consistent callbacks
+          await this.render(this.goToWalletInfoCallback!, this.onTransactionSelectCallback!);
+          // Make sure the filter state remains the same after rendering
+          this.excludeMalicious = currentExcludeMalicious;
+        } else {
+          // Show notification that there are no more transactions
+          const notification = document.createElement('div');
+          notification.className = 'fixed top-4 right-4 bg-gray-800 text-gray-300 px-4 py-2 rounded shadow-lg border border-gray-700';
+          notification.textContent = 'No more transactions available';
+          document.body.appendChild(notification);
+          setTimeout(() => {
+            document.body.removeChild(notification);
+          }, 3000);
+        }
+      });
+      
+      paginationContainer.appendChild(prevButton);
+      paginationContainer.appendChild(pageInfo);
+      paginationContainer.appendChild(nextButton);
+      container.appendChild(paginationContainer);
+      
+      // Add helpful instruction text
+      const helpText = document.createElement('p');
+      helpText.className = 'text-center text-gray-500 text-xs mt-4';
+      helpText.textContent = 'Click on a transaction to view details';
+      container.appendChild(helpText);
+      
+      // Add back button
+      const backButton = document.createElement('button');
+      backButton.className = 'mt-6 px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded transition-colors';
+      backButton.textContent = 'Back to Safe Info';
+      backButton.addEventListener('click', () => {
+        // Go directly back to wallet info using the dedicated callback
+        if (this.goToWalletInfoCallback) {
+          this.goToWalletInfoCallback();
+        }
+      });
+      container.appendChild(backButton);
+      
+      // Add keyboard navigation instructions
+      const keyboardHelp = document.createElement('div');
+      keyboardHelp.className = 'text-center text-gray-500 text-xs mt-4';
+      keyboardHelp.innerHTML = `
+        <div class="mb-2">Keyboard navigation:</div>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
+          <div><kbd class="px-2 py-1 bg-gray-700 rounded text-gray-300">↑</kbd> / <kbd class="px-2 py-1 bg-gray-700 rounded text-gray-300">↓</kbd> Navigate transactions</div>
+          <div><kbd class="px-2 py-1 bg-gray-700 rounded text-gray-300">Enter</kbd> View details</div>
+          <div><kbd class="px-2 py-1 bg-gray-700 rounded text-gray-300">Esc</kbd> Back to list</div>
+          <div><kbd class="px-2 py-1 bg-gray-700 rounded text-gray-300">←</kbd> / <kbd class="px-2 py-1 bg-gray-700 rounded text-gray-300">→</kbd> Change page</div>
+        </div>
+      `;
+      container.appendChild(keyboardHelp);
+      
+      // Setup keyboard navigation
+      this.setupKeyboardNavigation();
+      
+      // Highlight the first row if there are transactions
+      if (filteredTransactions.length > 0) {
+        this.highlightRow(this.selectedRowIndex);
+        
+        // Focus the first transaction row
+        setTimeout(() => {
+          const firstRow = document.querySelector('#transaction-table tbody tr[data-index="0"]') as HTMLElement;
+          if (firstRow) {
+            firstRow.focus();
+          }
+        }, 100);
+      }
+      
+    } catch (error) {
+      console.error('Error loading transactions:', error);
+      if (loadingIndicator.parentNode) {
+        loadingIndicator.textContent = 'Error loading transactions. Please try again.';
+        loadingIndicator.className = 'my-8 text-center text-red-500';
+      }
+    }
+  }
+
+  /**
+   * Shows the transaction details screen for a specific transaction
+   */
+  public showTransactionDetails(
+    tx: BlockchainTransaction, 
+    onExecuteTransaction?: (txHash: string) => void
+  ): void {
+    // Save the current page number before showing details
+    const pageBeforeDetails = this.transactionPage;
+    
+    // Create a simplified back handler that preserves the page
+    this.onBackClickCallback = () => {
+      // Set the flag to prevent page reset in render() method
+      this.isReturningFromDetails = true;
+      
+      // Reset page to what it was before viewing details
+      this.transactionPage = pageBeforeDetails;
+      
+      // If we're on an empty page, go back to the previous page
+      if (this.transactions.length === 0 && this.transactionPage > 0) {
+        this.transactionPage--;
+      }
+      
+      // Just directly render the list view instead of calling onBackClick
+      // This avoids the double-render issue
+      if (this.goToWalletInfoCallback && this.onTransactionSelectCallback) {
+        this.render(this.goToWalletInfoCallback, this.onTransactionSelectCallback);
+      }
+    };
+    
+    this.isDetailsView = true;
+    
+    // Remove existing keyboard listener and setup a new one for details view
+    this.removeKeyboardListener();
+    
+    // Setup keyboard listener for details view - with Escape key to go back
+    this.keyboardListener = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && this.onBackClickCallback) {
+        e.preventDefault();
+        this.onBackClickCallback();
+      }
+    };
+    document.addEventListener('keydown', this.keyboardListener, true);
+    
+    // Clear the buffer
+    this.buffer.innerHTML = '';
+    
+    // Create container
+    const container = document.createElement('div');
+    container.className = 'max-w-4xl mx-auto';
+    container.tabIndex = -1;
+    
+    // Add back button
+    const backButton = document.createElement('button');
+    backButton.className = 'mb-4 text-blue-400 hover:text-blue-300 flex items-center';
+    backButton.innerHTML = `
+      <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path>
+      </svg>
+      Back to Transactions
+    `;
+    backButton.addEventListener('click', this.onBackClickCallback);
+    container.appendChild(backButton);
+    
+    // Create details container
+    const detailsContainer = document.createElement('div');
+    detailsContainer.className = 'bg-gray-800 rounded-lg border border-gray-700 shadow-lg p-6 mb-6';
+    
+    // If transaction is malicious, add a warning banner
+    if (tx.analysis?.isMalicious) {
+      const warningBanner = document.createElement('div');
+      warningBanner.className = 'bg-red-900/50 border border-red-700 text-red-300 p-4 rounded-lg mb-6 flex items-start';
+      warningBanner.innerHTML = `
+        <svg class="w-6 h-6 mr-3 mt-1 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+        </svg>
+        <div>
+          <h4 class="font-bold mb-1">Potentially Malicious Transaction Detected</h4>
+          <p>${tx.analysis.reason}</p>
+          <p class="mt-2 text-sm">Confidence: ${Math.round(tx.analysis.confidence * 100)}%</p>
+        </div>
+      `;
+      detailsContainer.appendChild(warningBanner);
+    }
+    
+    // Display transaction info
+    const title = document.createElement('h3');
+    title.className = 'text-lg font-medium text-gray-300 mb-6';
+    title.textContent = `Transaction Details (${tx.dataDecoded?.method || 'Unknown'})`;
+    detailsContainer.appendChild(title);
+    
+    // Create transaction info grid
+    const infoGrid = document.createElement('div');
+    infoGrid.className = 'grid grid-cols-1 md:grid-cols-2 gap-4 mb-6';
+    
+    const fromAddress = tx.from || (tx.stateChanges && tx.stateChanges.length > 0 ? tx.stateChanges[0].from : 'Unknown');
+    
+    // Add transaction details
+    this.addDetailRow(infoGrid, 'Transaction Hash', tx.txHash, true);
+    if (tx.executedTxHash && tx.executedTxHash !== tx.txHash) {
+      this.addDetailRow(infoGrid, 'Executed Hash', tx.executedTxHash, true);
+    }
+    
+    const date = new Date(tx.timestamp * 1000);
+    this.addDetailRow(infoGrid, 'Date', date.toLocaleString());
+    this.addDetailRow(infoGrid, 'From', fromAddress, true);
+    this.addDetailRow(infoGrid, 'To', tx.to, true);
+    
+    if (tx.tokenInfo) {
+      this.addDetailRow(infoGrid, 'Token', tx.tokenInfo.name);
+      this.addDetailRow(infoGrid, 'Token Symbol', tx.tokenInfo.symbol);
+      this.addDetailRow(infoGrid, 'Token Contract', tx.tokenInfo.address, true);
+    }
+    
+    const formattedValue = tx.tokenInfo ? 
+      `${formatTokenValue(tx.value, tx.tokenInfo.decimals)} ${tx.tokenInfo.symbol}` : 
+      `${ethers.formatEther(tx.value)} ${this.getNativeTokenSymbol()}`;
+    this.addDetailRow(infoGrid, 'Value', formattedValue);
+    
+    // Add state changes section
+    if (tx.stateChanges && tx.stateChanges.length > 0) {
+      // Add state changes title
+      const stateChangesTitle = document.createElement('h4');
+      stateChangesTitle.className = 'text-md font-medium text-gray-300 mt-6 mb-3 col-span-2';
+      stateChangesTitle.textContent = 'State Changes';
+      infoGrid.appendChild(stateChangesTitle);
+      
+      // Show all state changes relevant to the safe wallet
+      // AND filter out 0 value ETH transactions (for multisig executions)
+      const relevantChanges = tx.stateChanges.filter(change => 
+        (change.from.toLowerCase() === this.safeAddress.toLowerCase() || 
+         change.to.toLowerCase() === this.safeAddress.toLowerCase()) &&
+        // Filter out native currency (ETH) transactions with 0 value
+        !(change.tokenAddress === '0x0000000000000000000000000000000000000000' && 
+          (change.value === '0' || change.value === '0x0' || parseInt(change.value, 16) === 0))
+      );
+      
+      if (relevantChanges.length === 0) {
+        const noChanges = document.createElement('div');
+        noChanges.className = 'text-gray-500 col-span-2';
+        noChanges.textContent = 'No relevant state changes for this wallet';
+        infoGrid.appendChild(noChanges);
+        } else {
+        const stateChangesContainer = document.createElement('div');
+        stateChangesContainer.className = 'col-span-2 space-y-2';
+        
+        relevantChanges.forEach(change => {
+          const isOutgoing = change.from.toLowerCase() === this.safeAddress.toLowerCase();
+          const directionClass = isOutgoing ? 'text-red-400' : 'text-green-400';
+          const formattedValue = formatTokenValue(change.value, change.tokenDecimals);
+          
+          const changeRow = document.createElement('div');
+          changeRow.className = `flex items-center justify-between p-2 rounded bg-gray-700/50 ${directionClass}`;
+          changeRow.innerHTML = `
+            <div class="flex items-center">
+              ${isOutgoing ? 
+                '<svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 11l5-5m0 0l5 5m-5-5v12"></path></svg>' : 
+                '<svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 13l-5 5m0 0l-5-5m5 5V6"></path></svg>'
+              }
+              ${isOutgoing ? 'Sent to ' : 'Received from '}
+              <span class="font-mono mx-1">${truncateAddress(isOutgoing ? change.to : change.from)}</span>
+            </div>
+            <div class="font-medium">${formattedValue} ${change.tokenSymbol}</div>
+          `
