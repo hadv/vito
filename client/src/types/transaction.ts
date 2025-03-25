@@ -18,6 +18,12 @@ export interface TransactionRequest {
   };
 }
 
+export interface TransactionAnalysis {
+  isMalicious: boolean;
+  confidence: number;
+  reason: string;
+}
+
 export interface BlockchainTransaction {
   id: string;
   timestamp: number;
@@ -61,4 +67,5 @@ export interface BlockchainTransaction {
     value: string;
     isStateChange: boolean;
   }[];
+  analysis?: TransactionAnalysis;
 } 

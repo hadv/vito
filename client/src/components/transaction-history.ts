@@ -44,6 +44,8 @@ export class TransactionHistory {
   private isReturningFromDetails = false;
   // Store callbacks for different navigation paths
   private goToWalletInfoCallback: (() => void) | null = null; // Callback to return to wallet info screen
+  // Filter flags for malicious transactions
+  private excludeMalicious = false;
 
   /**
    * Creates a new TransactionHistory component
@@ -136,11 +138,46 @@ export class TransactionHistory {
     container.className = 'max-w-4xl mx-auto';
     container.tabIndex = -1;
 
-    // Create title
+    // Create title and filter controls in the same row
+    const titleBar = document.createElement('div');
+    titleBar.className = 'flex justify-between items-center mb-4';
+    
+    const titleDiv = document.createElement('div');
+    
     const title = document.createElement('h2');
-    title.className = 'text-xl font-bold mb-4 text-gray-300';
+    title.className = 'text-xl font-bold text-gray-300';
     title.textContent = 'Blockchain Transactions';
-    container.appendChild(title);
+    titleDiv.appendChild(title);
+    
+    // Create filter controls
+    const filterControls = document.createElement('div');
+    filterControls.className = 'flex items-center space-x-2';
+    
+    const filterLabel = document.createElement('span');
+    filterLabel.className = 'text-sm text-gray-400';
+    filterLabel.textContent = 'Hide malicious:';
+    filterControls.appendChild(filterLabel);
+    
+    const toggleSwitch = document.createElement('label');
+    toggleSwitch.className = 'relative inline-flex items-center cursor-pointer';
+    toggleSwitch.innerHTML = `
+      <input type="checkbox" value="" class="sr-only peer" id="malicious-toggle">
+      <div class="w-11 h-6 bg-gray-700 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+    `;
+    filterControls.appendChild(toggleSwitch);
+    
+    // Set up toggle event
+    const toggleCheckbox = toggleSwitch.querySelector('#malicious-toggle') as HTMLInputElement;
+    toggleCheckbox.checked = this.excludeMalicious;
+    toggleCheckbox.addEventListener('change', async () => {
+      this.excludeMalicious = toggleCheckbox.checked;
+      this.transactionPage = 0; // Reset to first page when filtering changes
+      await this.render(this.goToWalletInfoCallback!, this.onTransactionSelectCallback!);
+    });
+    
+    titleBar.appendChild(titleDiv);
+    titleBar.appendChild(filterControls);
+    container.appendChild(titleBar);
 
     // Create description
     const description = document.createElement('p');
@@ -169,16 +206,21 @@ export class TransactionHistory {
         this.transactionPage * this.transactionsPerPage
       );
 
+      // Filter transactions if needed
+      const filteredTransactions = this.excludeMalicious 
+        ? transactions.filter((tx: BlockchainTransaction) => !tx.analysis?.isMalicious)
+        : transactions;
+
       // Store transactions for keyboard navigation
-      this.transactions = transactions;
+      this.transactions = filteredTransactions;
       this.selectedRowIndex = 0; // Reset selection when loading transactions
 
       // Remove loading indicator
       container.removeChild(loadingIndicator);
 
-      if (transactions.length === 0) {
+      if (filteredTransactions.length === 0) {
         // If we're on a page > 0 and there are no transactions, go back to previous page
-        if (this.transactionPage > 0) {
+        if (this.transactionPage > 0 && !this.excludeMalicious) {
           this.transactionPage--;
           // Re-render with the previous page
           await this.render(this.goToWalletInfoCallback!, this.onTransactionSelectCallback!);
@@ -187,7 +229,9 @@ export class TransactionHistory {
 
         const noTxMessage = document.createElement('div');
         noTxMessage.className = 'text-center py-8 text-gray-500 bg-gray-800 rounded-lg border border-gray-700 shadow-lg p-6';
-        noTxMessage.textContent = 'No blockchain transactions found for this Safe wallet address';
+        noTxMessage.textContent = this.excludeMalicious 
+          ? 'No normal transactions found for this Safe wallet address' 
+          : 'No blockchain transactions found for this Safe wallet address';
         container.appendChild(noTxMessage);
         
         // Add back button for empty state
@@ -216,6 +260,7 @@ export class TransactionHistory {
           <th class="py-3 px-4 text-left text-xs font-medium text-gray-400">Date</th>
           <th class="py-3 px-4 text-left text-xs font-medium text-gray-400">Hash</th>
           <th class="py-3 px-4 text-left text-xs font-medium text-gray-400">State Changes</th>
+          <th class="py-3 px-4 text-left text-xs font-medium text-gray-400">Security</th>
         </tr>
       `;
       table.appendChild(thead);
@@ -223,10 +268,18 @@ export class TransactionHistory {
       // Create table body
       const tbody = document.createElement('tbody');
       
-      transactions.forEach((tx: BlockchainTransaction, index: number) => {
+      filteredTransactions.forEach((tx: BlockchainTransaction, index: number) => {
         const tr = document.createElement('tr');
-        tr.className = index % 2 === 0 ? 'bg-gray-800' : 'bg-gray-800/50';
-        tr.classList.add('hover:bg-gray-700/50', 'cursor-pointer', 'border-b', 'border-gray-700');
+        
+        // Add malicious transaction highlight if detected
+        if (tx.analysis?.isMalicious) {
+          tr.classList.add('bg-red-900/30', 'hover:bg-red-800/50');
+        } else {
+          tr.className = index % 2 === 0 ? 'bg-gray-800' : 'bg-gray-800/50';
+          tr.classList.add('hover:bg-gray-700/50');
+        }
+        
+        tr.classList.add('cursor-pointer', 'border-b', 'border-gray-700');
         // Make each row focusable
         tr.tabIndex = 0;
         tr.dataset.index = index.toString();
@@ -281,6 +334,35 @@ export class TransactionHistory {
           stateChangesHTML = '<span class="text-gray-500">No state changes</span>';
         }
         
+        // Generate analysis content for security column
+        let securityHTML = '';
+        if (tx.analysis) {
+          const securityClass = tx.analysis.isMalicious 
+            ? 'text-red-400' 
+            : tx.analysis.confidence > 0.3 
+              ? 'text-yellow-400' 
+              : 'text-green-400';
+          
+          const warningIcon = tx.analysis.isMalicious 
+            ? '<svg class="w-5 h-5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>' 
+            : '';
+          
+          const confidencePercent = Math.round(tx.analysis.confidence * 100);
+          
+          securityHTML = `
+            <div class="flex items-center ${securityClass}">
+              ${warningIcon}
+              ${tx.analysis.isMalicious ? 'Malicious' : 'Safe'} 
+              <span class="text-xs ml-2">(${confidencePercent}% confidence)</span>
+            </div>
+            <div class="text-xs text-gray-400 mt-1 truncate max-w-xs" title="${tx.analysis.reason}">
+              ${tx.analysis.reason.length > 60 ? tx.analysis.reason.substring(0, 60) + '...' : tx.analysis.reason}
+            </div>
+          `;
+        } else {
+          securityHTML = '<span class="text-gray-500">Not analyzed</span>';
+        }
+        
         tr.innerHTML = `
           <td class="py-3 px-4 text-sm text-gray-300">${formattedDate}</td>
           <td class="py-3 px-4 text-sm font-mono">
@@ -292,6 +374,7 @@ export class TransactionHistory {
             </a>
           </td>
           <td class="py-3 px-4 text-sm">${stateChangesHTML}</td>
+          <td class="py-3 px-4 text-sm">${securityHTML}</td>
         `;
         
         // Set up the transaction row click event with the right page tracking
@@ -329,12 +412,12 @@ export class TransactionHistory {
       const nextButton = document.createElement('button');
       nextButton.className = 'px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded transition-colors';
       nextButton.textContent = 'Next';
-      nextButton.disabled = transactions.length < this.transactionsPerPage;
+      nextButton.disabled = filteredTransactions.length < this.transactionsPerPage;
       if (nextButton.disabled) {
         nextButton.classList.add('opacity-50', 'cursor-not-allowed');
       }
       nextButton.addEventListener('click', async () => {
-        if (transactions.length >= this.transactionsPerPage) {
+        if (filteredTransactions.length >= this.transactionsPerPage) {
           this.transactionPage++;
           // Use consistent callbacks
           await this.render(this.goToWalletInfoCallback!, this.onTransactionSelectCallback!);
@@ -391,7 +474,7 @@ export class TransactionHistory {
       this.setupKeyboardNavigation();
       
       // Highlight the first row if there are transactions
-      if (transactions.length > 0) {
+      if (filteredTransactions.length > 0) {
         this.highlightRow(this.selectedRowIndex);
         
         // Focus the first transaction row
@@ -480,6 +563,23 @@ export class TransactionHistory {
     const detailsContainer = document.createElement('div');
     detailsContainer.className = 'bg-gray-800 rounded-lg border border-gray-700 shadow-lg p-6 mb-6';
     
+    // If transaction is malicious, add a warning banner
+    if (tx.analysis?.isMalicious) {
+      const warningBanner = document.createElement('div');
+      warningBanner.className = 'bg-red-900/50 border border-red-700 text-red-300 p-4 rounded-lg mb-6 flex items-start';
+      warningBanner.innerHTML = `
+        <svg class="w-6 h-6 mr-3 mt-1 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+        </svg>
+        <div>
+          <h4 class="font-bold mb-1">Potentially Malicious Transaction Detected</h4>
+          <p>${tx.analysis.reason}</p>
+          <p class="mt-2 text-sm">Confidence: ${Math.round(tx.analysis.confidence * 100)}%</p>
+        </div>
+      `;
+      detailsContainer.appendChild(warningBanner);
+    }
+    
     // Display transaction info
     const title = document.createElement('h3');
     title.className = 'text-lg font-medium text-gray-300 mb-6';
@@ -567,6 +667,7 @@ export class TransactionHistory {
       }
     }
     
+    // After the existing info grid display, add security analysis section
     detailsContainer.appendChild(infoGrid);
     
     // Add transaction data section if available
@@ -614,6 +715,43 @@ export class TransactionHistory {
       dataContainer.appendChild(copyBtn);
       
       detailsContainer.appendChild(dataContainer);
+    }
+    
+    // Add security analysis section if available
+    if (tx.analysis) {
+      const securityTitle = document.createElement('h4');
+      securityTitle.className = 'text-md font-medium text-gray-300 mt-8 mb-4';
+      securityTitle.textContent = 'Security Analysis';
+      detailsContainer.appendChild(securityTitle);
+      
+      const securityContainer = document.createElement('div');
+      securityContainer.className = 'bg-gray-900/50 rounded-lg border border-gray-700 p-4';
+      
+      const statusColor = tx.analysis.isMalicious 
+        ? 'text-red-400' 
+        : tx.analysis.confidence > 0.3 
+          ? 'text-yellow-400' 
+          : 'text-green-400';
+      
+      securityContainer.innerHTML = `
+        <div class="flex items-center mb-3">
+          <span class="text-gray-400 mr-2">Status:</span>
+          <span class="${statusColor} font-medium">${tx.analysis.isMalicious ? 'Malicious' : 'Safe'}</span>
+        </div>
+        <div class="flex items-center mb-3">
+          <span class="text-gray-400 mr-2">Confidence:</span>
+          <div class="relative h-4 w-full bg-gray-700 rounded-full overflow-hidden">
+            <div class="absolute top-0 left-0 h-full bg-blue-600" style="width: ${Math.round(tx.analysis.confidence * 100)}%"></div>
+          </div>
+          <span class="ml-2 text-sm">${Math.round(tx.analysis.confidence * 100)}%</span>
+        </div>
+        <div class="mb-3">
+          <span class="text-gray-400">Reason:</span>
+          <p class="mt-1 text-gray-300 text-sm">${tx.analysis.reason}</p>
+        </div>
+      `;
+      
+      detailsContainer.appendChild(securityContainer);
     }
     
     container.appendChild(detailsContainer);

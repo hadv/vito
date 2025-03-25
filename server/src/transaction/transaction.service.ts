@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as fetch from 'node-fetch';
+import { TransactionAnalysisService } from './services/transaction-analysis.service';
 
 export interface SafeTransaction {
   id: string;
@@ -70,6 +71,7 @@ export class TransactionService {
 
   constructor(
     private readonly configService: ConfigService,
+    private readonly transactionAnalysisService: TransactionAnalysisService,
   ) {
     // Get a single API key for all networks
     const apiKey = this.configService.get<string>('ETHERSCAN_API_KEY', 'PXN99XX2X2RY6GDK6IIC8MK9D7NI1Y7TI2');
@@ -142,26 +144,29 @@ export class TransactionService {
         0 // Always fetch from beginning to properly deduplicate
       );
       
-      // Log if no transactions were found
-      if (transactions.length === 0) {
-        this.logger.log(`No blockchain transactions found via Etherscan for ${safeAddress}`);
-        return [];
-      }
-      
-      // Store in cache
-      this.txCache[cacheKey] = {
+      // Analyze transactions for malicious activity
+      const analyzedTransactions = await this.transactionAnalysisService.analyzeBatchTransactions(
         transactions,
+        {
+          safeAddress,
+          chainId,
+        }
+      );
+      
+      // Store analyzed transactions in cache
+      this.txCache[cacheKey] = {
+        transactions: analyzedTransactions,
         timestamp: Date.now()
       };
-      this.logger.log(`Cached ${transactions.length} blockchain transactions for ${safeAddress}`);
+      this.logger.log(`Cached ${analyzedTransactions.length} analyzed blockchain transactions for ${safeAddress}`);
       
       // Return the requested page
-      const availableCount = transactions.length;
+      const availableCount = analyzedTransactions.length;
       if (skip >= availableCount) {
         return []; // No more transactions
       }
       
-      return transactions.slice(skip, Math.min(skip + first, availableCount));
+      return analyzedTransactions.slice(skip, Math.min(skip + first, availableCount));
     } catch (error) {
       this.logger.error(`Error fetching blockchain transactions: ${error.message}`, error.stack);
       return [];
