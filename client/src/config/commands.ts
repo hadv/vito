@@ -4,6 +4,7 @@ export const COMMANDS: Command[] = [
   { cmd: ':c', desc: 'Connect a Safe wallet' },
   { cmd: ':i', desc: 'Display Safe information' },
   { cmd: ':wc', desc: 'Connect a signer wallet via WalletConnect' },
+  { cmd: ':wd', desc: 'Connect to dApp with WalletConnect URI' },
   { cmd: ':dc', desc: 'Disconnect the current signer wallet' },
   { cmd: ':t', desc: 'Create a new transaction' },
   { cmd: ':l', desc: 'List pending transactions' },
@@ -14,4 +15,5 @@ export const COMMANDS: Command[] = [
   { cmd: ':del', desc: 'Delete selected pending transaction' },
   { cmd: ':e', desc: 'Execute selected pending transaction' },
   { cmd: ':his', desc: 'View transaction history for the connected Safe wallet' },
+  { cmd: ':dd', desc: 'Disconnect from current dApp' },
 ]; 
