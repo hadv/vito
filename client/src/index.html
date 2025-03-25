@@ -14,6 +14,12 @@
     </div>
     <div class="flex items-center space-x-4">
       <span id="signer-address-display" class="text-gray-400 text-sm"></span>
+      <div id="dapp-connection-indicator" class="hidden">
+        <div class="flex items-center space-x-2 bg-gray-700 px-2 py-1 rounded">
+          <img id="dapp-icon" src="" alt="dApp" class="w-4 h-4 rounded-full">
+          <span id="dapp-name" class="text-xs text-gray-300"></span>
+        </div>
+      </div>
       <div class="relative hidden" id="header-network-container">
         <select id="header-network-select" disabled class="h-[32px] pl-3 pr-8 text-gray-400 bg-[#2c2c2c] border border-gray-700 rounded-lg focus:outline-none appearance-none cursor-not-allowed text-sm">
           <option value="mainnet">Ethereum</option>

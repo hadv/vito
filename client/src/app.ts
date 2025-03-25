@@ -28,8 +28,10 @@ class VimApp {
   private signerAddress: string | null = null;
   private socket!: Socket;
   private provider!: ethers.JsonRpcProvider;
-  private signClient: any; // WalletConnect SignClient instance
-  private sessionTopic: string | null = null; // Store the WalletConnect session topic
+  private signClient: any; // WalletConnect SignClient instance for signer wallet connections
+  private dAppClient: any; // WalletConnect SignClient instance for dApp connections
+  private sessionTopic: string | null = null; // Store the signer WalletConnect session topic
+  private dAppSessionTopic: string | null = null; // Store the dApp WalletConnect session topic
   private cachedSafeInfo: SafeInfo | null = null;
   private selectedNetwork!: NetworkConfig;
   private isConnecting: boolean = false; // Add flag to track connection state
@@ -859,6 +861,21 @@ class VimApp {
         await this.initializeWalletConnect(this.selectedNetwork.chainId);
       } catch (error) {
         console.error('Failed to initialize WalletConnect:', error);
+        this.buffer.textContent = `Error: ${error instanceof Error ? error.message : 'Unknown error'}`;
+        this.buffer.className = 'flex-1 p-4 overflow-y-auto text-red-500';
+      }
+    } else if (this.command === ':wd') {
+      if (!this.safeAddress) {
+        this.buffer.textContent = 'Please connect a Safe address with :c first';
+        this.buffer.className = 'flex-1 p-4 overflow-y-auto text-yellow-400';
+        return;
+      }
+
+      try {
+        // Show URI input form
+        await this.connectWithWalletConnectUri();
+      } catch (error) {
+        console.error('Failed to connect with WalletConnect URI:', error);
         this.buffer.textContent = `Error: ${error instanceof Error ? error.message : 'Unknown error'}`;
         this.buffer.className = 'flex-1 p-4 overflow-y-auto text-red-500';
       }
@@ -1741,6 +1758,8 @@ class VimApp {
       }
       
       await this.showTransactionHistoryScreen();
+    } else if (this.command === ':dd') {
+      await this.disconnectFromDApp();
     } else {
       this.buffer.textContent = `Unknown command: ${this.command}`;
       this.buffer.className = 'flex-1 p-4 overflow-y-auto text-red-500';
@@ -3185,10 +3204,228 @@ class VimApp {
       errorMsg.textContent = `Error: ${error instanceof Error ? error.message : 'Unknown error'}`;
       errorMsg.className = 'text-red-500';
       this.buffer.appendChild(errorMsg);
-      throw error;
     } finally {
       // Reset connecting flag
       this.isConnecting = false;
+    }
+  }
+
+  private async connectWithWalletConnectUri(uri?: string): Promise<void> {
+    // If URI is not provided, show a form for user to input a URI
+    if (!uri) {
+      this.buffer.innerHTML = `
+      <form id="wdUriForm" class="space-y-4">
+        <div class="mb-4">
+          <label for="wdUri" class="block text-sm font-medium text-gray-300">Enter dApp WalletConnect URI:</label>
+          <input type="text" id="wdUri" class="mt-1 block w-full rounded-md bg-gray-700 border-gray-600 text-white shadow-sm focus:border-blue-500 focus:ring-blue-500" placeholder="wc:..." required>
+        </div>
+        <div>
+          <button type="submit" class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
+            Connect
+          </button>
+        </div>
+      </form>
+      `;
+
+      // Handle form submission
+      const form = document.getElementById('wdUriForm') as HTMLFormElement;
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const input = document.getElementById('wdUri') as HTMLInputElement;
+        const uri = input.value.trim();
+        
+        // Make sure the URI starts with "wc:"
+        if (!uri.startsWith('wc:')) {
+          const errorMsg = document.createElement('p');
+          errorMsg.textContent = 'Invalid WalletConnect URI. URI must start with "wc:"';
+          errorMsg.className = 'text-red-400 mt-2';
+          form.appendChild(errorMsg);
+          return;
+        }
+        
+        await this.connectWithWalletConnectUri(uri);
+      });
+      return;
+    }
+
+    // Prevent duplicate connections
+    if (this.isConnecting) {
+      console.log('Connection already in progress, ignoring request');
+      return;
+    }
+
+    try {
+      // Set connecting flag
+      this.isConnecting = true;
+
+      // Initialize dApp WalletConnect client if not already initialized
+      if (!this.dAppClient) {
+        this.dAppClient = await SignClient.init({
+          projectId: import.meta.env.VITE_WALLET_CONNECT_PROJECT_ID,
+          metadata: {
+            name: 'Safe Wallet',
+            description: 'Safe Wallet - The most trusted decentralized custody protocol and collective asset management platform',
+            url: 'https://safe.global',
+            icons: ['https://safe.global/images/logo.png']
+          }
+        });
+
+        // Handle session proposal events
+        this.dAppClient.on('session_proposal', async (proposal: any) => {
+          console.log('Received session proposal:', proposal);
+          
+          try {
+            // Accept the proposal
+            const { id, params } = proposal;
+            
+            // Check if the proposal has any required namespaces
+            if (!params?.requiredNamespaces) {
+              console.error('Missing required namespaces in the proposal');
+              throw new Error('Invalid proposal format: missing required namespaces');
+            }
+            
+            // Create a valid namespaces object even if eip155 is missing
+            const supportedNamespaces: any = {};
+            
+            // Add eip155 namespace with our account
+            supportedNamespaces.eip155 = {
+              accounts: [`eip155:${this.selectedNetwork.chainId}:${this.safeAddress}`],
+              methods: [
+                'eth_sign',
+                'personal_sign',
+                'eth_signTypedData',
+                'eth_signTypedData_v4',
+                'eth_sendTransaction',
+                'eth_signTransaction'
+              ],
+              events: [
+                'accountsChanged', 
+                'chainChanged', 
+                'disconnect'
+              ]
+            };
+            
+            // If the proposal also has eip155 namespace, use its methods and events
+            if (params.requiredNamespaces.eip155) {
+              if (params.requiredNamespaces.eip155.methods) {
+                supportedNamespaces.eip155.methods = params.requiredNamespaces.eip155.methods;
+              }
+              if (params.requiredNamespaces.eip155.events) {
+                supportedNamespaces.eip155.events = params.requiredNamespaces.eip155.events;
+              }
+            }
+            
+            const approveResponse = await this.dAppClient.approve({
+              id,
+              namespaces: supportedNamespaces
+            });
+            
+            this.dAppSessionTopic = approveResponse.topic;
+            console.log('Session established with topic:', this.dAppSessionTopic);
+            
+            // Show the dApp indicator in the header with metadata from the proposal
+            this.updateDAppConnectionIndicator(params.proposer.metadata);
+            
+            // Show success message
+            this.buffer.innerHTML = '';
+            const successMsg = document.createElement('p');
+            successMsg.textContent = `Connected to dApp (Session: ${this.dAppSessionTopic})`;
+            successMsg.className = 'text-green-400';
+            this.buffer.appendChild(successMsg);
+          } catch (error: any) {
+            console.error('Error handling session proposal:', error);
+            this.buffer.innerHTML = '';
+            const errorMsg = document.createElement('p');
+            errorMsg.textContent = `Error connecting to dApp: ${error.message || 'Unknown error'}`;
+            errorMsg.className = 'text-red-400';
+            this.buffer.appendChild(errorMsg);
+          }
+        });
+
+        this.dAppClient.on('session_delete', (event: any) => {
+          console.log('dApp session deleted:', event);
+          
+          // Reset the dApp session
+          this.dAppSessionTopic = null;
+          
+          // Hide the dApp indicator in the header
+          this.hideDAppConnectionIndicator();
+          
+          // Notify the user about the disconnection if we're not in the middle of disconnecting
+          if (this.buffer.innerHTML.includes('Connecting to dApp') || 
+              !this.buffer.innerHTML.includes('disconnected from dApp')) {
+            this.buffer.innerHTML = '';
+            const disconnectMsg = document.createElement('p');
+            disconnectMsg.textContent = 'dApp has disconnected';
+            disconnectMsg.className = 'text-yellow-400';
+            this.buffer.appendChild(disconnectMsg);
+          }
+        });
+      }
+
+      // Show loading message
+      this.buffer.innerHTML = '';
+      const loadingMsg = document.createElement('p');
+      loadingMsg.textContent = 'Connecting to dApp...';
+      loadingMsg.className = 'text-center text-white animate-pulse';
+      this.buffer.appendChild(loadingMsg);
+
+      try {
+        // Pair with the dApp using the URI
+        await this.dAppClient.pair({ uri });
+        
+        // The session will be established through the session_proposal event listener
+      } catch (error: any) {
+        console.error('Failed to connect to dApp:', error);
+        this.buffer.innerHTML = '';
+        const errorMsg = document.createElement('p');
+        errorMsg.textContent = `Failed to connect to dApp: ${error.message || 'Unknown error'}`;
+        errorMsg.className = 'text-red-400';
+        this.buffer.appendChild(errorMsg);
+      }
+    } catch (error) {
+      console.error('Error connecting with WalletConnect URI:', error);
+      this.buffer.innerHTML = '';
+      const errorMsg = document.createElement('p');
+      errorMsg.textContent = `Error: ${error instanceof Error ? error.message : 'Unknown error'}`;
+      errorMsg.className = 'text-red-500';
+      this.buffer.appendChild(errorMsg);
+    } finally {
+      // Reset connecting flag
+      this.isConnecting = false;
+    }
+  }
+
+  // Add these new methods to handle the dApp connection indicator
+  private updateDAppConnectionIndicator(metadata: any): void {
+    if (!metadata) return;
+    
+    const dappIndicator = document.getElementById('dapp-connection-indicator');
+    const dappIcon = document.getElementById('dapp-icon') as HTMLImageElement;
+    const dappName = document.getElementById('dapp-name');
+    
+    if (dappIndicator && dappIcon && dappName) {
+      // Set the dApp icon if available
+      if (metadata.icons && metadata.icons.length > 0) {
+        dappIcon.src = metadata.icons[0];
+      } else {
+        // Default icon if none provided
+        dappIcon.src = 'https://safe.global/images/logo.png';
+      }
+      
+      // Set the dApp name
+      dappName.textContent = metadata.name || 'Connected dApp';
+      
+      // Show the indicator
+      dappIndicator.classList.remove('hidden');
+    }
+  }
+  
+  private hideDAppConnectionIndicator(): void {
+    const dappIndicator = document.getElementById('dapp-connection-indicator');
+    
+    if (dappIndicator) {
+      dappIndicator.classList.add('hidden');
     }
   }
 
@@ -3575,15 +3812,7 @@ class VimApp {
             const selectedOption = dropdownContainer.querySelector('.bg-gray-700');
             if (selectedOption) {
               input.value = selectedOption.textContent || '';
-              const toAddress = input.value;
-              if (isEth) {
-                vimApp.txFormData!.to = toAddress; // For ETH, recipient is the to field
-              } else {
-                // For ERC20, we need to update the transfer call data
-                vimApp.updateERC20TransferData(token.address, toAddress, 
-                  (document.getElementById('tx-amount') as HTMLInputElement)?.value || '0', 
-                  token.decimals);
-              }
+              vimApp.txFormData!.to = input.value;
               dropdownContainer.classList.add('hidden');
             }
           } else if (keyEvent.key === 'Escape') {
@@ -3914,6 +4143,49 @@ class VimApp {
         this.executeSelectedTransaction();
       }
     );
+  }
+
+  // Add this new method
+  private async disconnectFromDApp(): Promise<void> {
+    if (!this.dAppClient || !this.dAppSessionTopic) {
+      this.buffer.innerHTML = '';
+      const errorMsg = document.createElement('p');
+      errorMsg.textContent = 'No dApp is currently connected';
+      errorMsg.className = 'text-red-400';
+      this.buffer.appendChild(errorMsg);
+      return;
+    }
+
+    try {
+      // Disconnect the current dApp session
+      await this.dAppClient.disconnect({
+        topic: this.dAppSessionTopic,
+        reason: {
+          code: 6000,
+          message: 'User disconnected'
+        }
+      });
+
+      // Reset the dApp session topic
+      this.dAppSessionTopic = null;
+
+      // Hide the dApp indicator in the header
+      this.hideDAppConnectionIndicator();
+
+      // Show success message
+      this.buffer.innerHTML = '';
+      const successMsg = document.createElement('p');
+      successMsg.textContent = 'Successfully disconnected from dApp';
+      successMsg.className = 'text-green-400';
+      this.buffer.appendChild(successMsg);
+    } catch (error: any) {
+      console.error('Failed to disconnect from dApp:', error);
+      this.buffer.innerHTML = '';
+      const errorMsg = document.createElement('p');
+      errorMsg.textContent = `Failed to disconnect from dApp: ${error.message || 'Unknown error'}`;
+      errorMsg.className = 'text-red-400';
+      this.buffer.appendChild(errorMsg);
+    }
   }
 }
 
