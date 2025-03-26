@@ -75,12 +75,15 @@ class VimApp {
       return;
     }
 
-    // Set default network
+    // Initialize network selection with default
     this.selectedNetwork = getNetworkConfig(DEFAULT_NETWORK);
-    
-    // Initialize Ethereum provider for the selected network
     this.provider = new ethers.JsonRpcProvider(this.selectedNetwork.provider);
-
+    
+    // Set default network in select if available
+    if (this.networkSelect) {
+      this.networkSelect.value = DEFAULT_NETWORK;
+    }
+    
     console.log('VITE_API_URL:', import.meta.env.VITE_API_URL);
 
     const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
@@ -158,9 +161,10 @@ class VimApp {
       console.log('Keydown event:', e.key); // Add logging
       
       if (e.key === ':') {
+        e.preventDefault();
         this.command = ':';
         this.updateStatus();
-        e.preventDefault();
+        this.commandInput.focus();
       } else if (this.command.startsWith(':')) {
         if (e.key === 'Enter') {
           await this.executeCommand();
@@ -191,6 +195,17 @@ class VimApp {
     setTimeout(() => {
       this.commandInput.focus();
     }, 100);
+
+    // Network selection handler
+    if (this.networkSelect) {
+      this.networkSelect.addEventListener('change', () => {
+        const selectedNetwork = this.networkSelect!.value;
+        console.log('Network changed to:', selectedNetwork);
+        this.selectedNetwork = getNetworkConfig(selectedNetwork);
+        this.provider = new ethers.JsonRpcProvider(this.selectedNetwork.provider);
+        console.log('Provider updated with:', this.selectedNetwork.provider);
+      });
+    }
   }
 
   private showInitialInputContainer(): void {
@@ -319,11 +334,26 @@ class VimApp {
         throw new Error('Invalid Safe address');
       }
 
-      // Check if the Safe exists on the selected network
+      // Ensure network is selected and provider is up to date
+      if (!this.networkSelect || !this.networkSelect.value) {
+        throw new Error('Please select a network first');
+      }
+
+      // Update network and provider
+      const selectedNetwork = this.networkSelect.value;
+      console.log('Selected network:', selectedNetwork);
+      this.selectedNetwork = getNetworkConfig(selectedNetwork);
+      this.provider = new ethers.JsonRpcProvider(this.selectedNetwork.provider);
+      console.log('Using provider:', this.selectedNetwork.provider);
+
+      // Check if Safe exists on the selected network
       const code = await this.provider.getCode(safeAddress);
       if (code === '0x') {
         throw new Error(`Safe does not exist on ${this.selectedNetwork.displayName}`);
       }
+
+      // Initialize WalletConnect with the correct chain ID
+      await this.initializeWalletConnect(this.selectedNetwork.chainId);
 
       // Store the Safe address
       this.safeAddress = safeAddress;
@@ -888,9 +918,11 @@ class VimApp {
       this.txFormData = null;
       this.mode = 'READ ONLY';
       
-      // Reset network to default
-      this.selectedNetwork = getNetworkConfig(DEFAULT_NETWORK);
-      this.provider = new ethers.JsonRpcProvider(this.selectedNetwork.provider);
+      // Reset network to current selection
+      if (this.networkSelect) {
+        this.selectedNetwork = getNetworkConfig(this.networkSelect.value);
+        this.provider = new ethers.JsonRpcProvider(this.selectedNetwork.provider);
+      }
       
       // Clear displays
       this.safeAddressDisplay.textContent = '';
@@ -3213,29 +3245,91 @@ class VimApp {
   private async connectWithWalletConnectUri(uri?: string): Promise<void> {
     // If URI is not provided, show a form for user to input a URI
     if (!uri) {
-      this.buffer.innerHTML = `
-      <form id="wdUriForm" class="space-y-4">
-        <div class="mb-4">
-          <label for="wdUri" class="block text-sm font-medium text-gray-300">Enter dApp WalletConnect URI:</label>
-          <input type="text" id="wdUri" class="mt-1 block w-full rounded-md bg-gray-700 border-gray-600 text-white shadow-sm focus:border-blue-500 focus:ring-blue-500" placeholder="wc:..." required>
-        </div>
-        <div>
-          <button type="submit" class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
-            Connect
-          </button>
-        </div>
-      </form>
-      `;
+      // Clear existing content
+      this.buffer.innerHTML = '';
+      this.buffer.className = 'flex-1 p-4 overflow-y-auto';
+
+      // Create container with consistent styling
+      const formContainer = document.createElement('div');
+      formContainer.className = 'max-w-2xl mx-auto bg-gray-800 p-6 rounded-lg border border-gray-700 shadow-lg';
+
+      // Create form title
+      const title = document.createElement('h3');
+      title.className = 'text-xl font-bold text-white mb-6';
+      title.textContent = 'Connect to dApp';
+
+      // Add descriptive text
+      const description = document.createElement('p');
+      description.className = 'text-gray-400 text-sm mb-6';
+      description.textContent = 'Enter a WalletConnect URI to connect to an external dApp.';
+
+      const form = document.createElement('form');
+      form.id = 'wdUriForm';
+      form.className = 'space-y-6';
+
+      const fieldContainer = document.createElement('div');
+      fieldContainer.className = 'relative';
+
+      const label = document.createElement('label');
+      label.htmlFor = 'wdUri';
+      label.className = 'block text-sm font-medium text-gray-300 mb-1';
+      label.textContent = 'WalletConnect URI';
+
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.id = 'wdUri';
+      input.className = 'w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent';
+      input.placeholder = 'wc:...';
+      input.required = true;
+
+      // Add keydown event listener for : key
+      input.addEventListener('keydown', function(this: HTMLElement, e: Event) {
+        const keyEvent = e as KeyboardEvent;
+        if (keyEvent.key === ':') {
+          e.preventDefault();
+          e.stopPropagation();
+          (document.getElementById('command-input') as HTMLInputElement)?.focus();
+          (window as any).vimApp.command = ':';
+          (window as any).vimApp.updateStatus();
+        }
+      });
+
+      fieldContainer.appendChild(label);
+      fieldContainer.appendChild(input);
+      form.appendChild(fieldContainer);
+
+      // Create action buttons section
+      const buttonContainer = document.createElement('div');
+      buttonContainer.className = 'flex justify-end gap-3 mt-6';
+
+      const submitButton = document.createElement('button');
+      submitButton.type = 'submit';
+      submitButton.className = 'px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-800';
+      submitButton.textContent = 'Connect';
+
+      buttonContainer.appendChild(submitButton);
+      form.appendChild(buttonContainer);
+
+      // Add the elements to the container
+      formContainer.appendChild(title);
+      formContainer.appendChild(description);
+      formContainer.appendChild(form);
+      this.buffer.appendChild(formContainer);
 
       // Handle form submission
-      const form = document.getElementById('wdUriForm') as HTMLFormElement;
       form.addEventListener('submit', async (e) => {
         e.preventDefault();
-        const input = document.getElementById('wdUri') as HTMLInputElement;
-        const uri = input.value.trim();
+        const inputElement = document.getElementById('wdUri') as HTMLInputElement;
+        const uri = inputElement.value.trim();
         
         // Make sure the URI starts with "wc:"
         if (!uri.startsWith('wc:')) {
+          // Remove any existing error message
+          const existingError = form.querySelector('.text-red-400');
+          if (existingError) {
+            existingError.remove();
+          }
+          
           const errorMsg = document.createElement('p');
           errorMsg.textContent = 'Invalid WalletConnect URI. URI must start with "wc:"';
           errorMsg.className = 'text-red-400 mt-2';
@@ -3328,17 +3422,56 @@ class VimApp {
             
             // Show success message
             this.buffer.innerHTML = '';
+            const successContainer = document.createElement('div');
+            successContainer.className = 'max-w-2xl mx-auto bg-gray-800 p-6 rounded-lg border border-gray-700 shadow-lg';
+            
+            const successTitle = document.createElement('h3');
+            successTitle.className = 'text-xl font-bold text-white mb-4';
+            successTitle.textContent = 'Connection Successful';
+            
             const successMsg = document.createElement('p');
             successMsg.textContent = `Connected to dApp (Session: ${this.dAppSessionTopic})`;
-            successMsg.className = 'text-green-400';
-            this.buffer.appendChild(successMsg);
+            successMsg.className = 'text-green-400 mb-4';
+            
+            const dAppInfo = document.createElement('div');
+            dAppInfo.className = 'mt-4 p-4 bg-gray-900 rounded-lg border border-gray-700';
+            
+            if (params.proposer.metadata.name) {
+              const dAppName = document.createElement('p');
+              dAppName.className = 'text-white font-medium';
+              dAppName.textContent = `dApp: ${params.proposer.metadata.name}`;
+              dAppInfo.appendChild(dAppName);
+            }
+            
+            if (params.proposer.metadata.url) {
+              const dAppUrl = document.createElement('p');
+              dAppUrl.className = 'text-gray-400 text-sm';
+              dAppUrl.textContent = `URL: ${params.proposer.metadata.url}`;
+              dAppInfo.appendChild(dAppUrl);
+            }
+            
+            successContainer.appendChild(successTitle);
+            successContainer.appendChild(successMsg);
+            successContainer.appendChild(dAppInfo);
+            this.buffer.appendChild(successContainer);
           } catch (error: any) {
             console.error('Error handling session proposal:', error);
             this.buffer.innerHTML = '';
+            
+            const errorContainer = document.createElement('div');
+            errorContainer.className = 'max-w-2xl mx-auto bg-gray-800 p-6 rounded-lg border border-gray-700 shadow-lg';
+            
+            const errorTitle = document.createElement('h3');
+            errorTitle.className = 'text-xl font-bold text-white mb-4';
+            errorTitle.textContent = 'Connection Failed';
+            
             const errorMsg = document.createElement('p');
-            errorMsg.textContent = `Error connecting to dApp: ${error.message || 'Unknown error'}`;
+            errorMsg.textContent = `Failed to connect to dApp: ${error.message || 'Unknown error'}`;
             errorMsg.className = 'text-red-400';
-            this.buffer.appendChild(errorMsg);
+            
+            errorContainer.appendChild(errorTitle);
+            errorContainer.appendChild(errorMsg);
+            this.buffer.appendChild(errorContainer);
           }
         });
 
@@ -3365,10 +3498,27 @@ class VimApp {
 
       // Show loading message
       this.buffer.innerHTML = '';
+      this.buffer.className = 'flex-1 p-4 overflow-y-auto';
+      
+      const loadingContainer = document.createElement('div');
+      loadingContainer.className = 'max-w-2xl mx-auto bg-gray-800 p-6 rounded-lg border border-gray-700 shadow-lg text-center';
+      
+      const loadingTitle = document.createElement('h3');
+      loadingTitle.className = 'text-xl font-bold text-white mb-4';
+      loadingTitle.textContent = 'Connecting to dApp';
+      
       const loadingMsg = document.createElement('p');
-      loadingMsg.textContent = 'Connecting to dApp...';
-      loadingMsg.className = 'text-center text-white animate-pulse';
-      this.buffer.appendChild(loadingMsg);
+      loadingMsg.textContent = 'Please wait while we establish the connection...';
+      loadingMsg.className = 'text-gray-300 mb-6';
+      
+      const loadingSpinner = document.createElement('div');
+      loadingSpinner.className = 'inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-blue-500 border-r-transparent align-[-0.125em] motion-reduce:animate-[spin_1.5s_linear_infinite]';
+      loadingSpinner.setAttribute('role', 'status');
+      
+      loadingContainer.appendChild(loadingTitle);
+      loadingContainer.appendChild(loadingMsg);
+      loadingContainer.appendChild(loadingSpinner);
+      this.buffer.appendChild(loadingContainer);
 
       try {
         // Pair with the dApp using the URI
@@ -3378,18 +3528,40 @@ class VimApp {
       } catch (error: any) {
         console.error('Failed to connect to dApp:', error);
         this.buffer.innerHTML = '';
+        
+        const errorContainer = document.createElement('div');
+        errorContainer.className = 'max-w-2xl mx-auto bg-gray-800 p-6 rounded-lg border border-gray-700 shadow-lg';
+        
+        const errorTitle = document.createElement('h3');
+        errorTitle.className = 'text-xl font-bold text-white mb-4';
+        errorTitle.textContent = 'Connection Failed';
+        
         const errorMsg = document.createElement('p');
         errorMsg.textContent = `Failed to connect to dApp: ${error.message || 'Unknown error'}`;
         errorMsg.className = 'text-red-400';
-        this.buffer.appendChild(errorMsg);
+        
+        errorContainer.appendChild(errorTitle);
+        errorContainer.appendChild(errorMsg);
+        this.buffer.appendChild(errorContainer);
       }
     } catch (error) {
       console.error('Error connecting with WalletConnect URI:', error);
       this.buffer.innerHTML = '';
+      
+      const errorContainer = document.createElement('div');
+      errorContainer.className = 'max-w-2xl mx-auto bg-gray-800 p-6 rounded-lg border border-gray-700 shadow-lg';
+      
+      const errorTitle = document.createElement('h3');
+      errorTitle.className = 'text-xl font-bold text-white mb-4';
+      errorTitle.textContent = 'Connection Error';
+      
       const errorMsg = document.createElement('p');
       errorMsg.textContent = `Error: ${error instanceof Error ? error.message : 'Unknown error'}`;
-      errorMsg.className = 'text-red-500';
-      this.buffer.appendChild(errorMsg);
+      errorMsg.className = 'text-red-400';
+      
+      errorContainer.appendChild(errorTitle);
+      errorContainer.appendChild(errorMsg);
+      this.buffer.appendChild(errorContainer);
     } finally {
       // Reset connecting flag
       this.isConnecting = false;
