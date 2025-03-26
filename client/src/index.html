@@ -7,25 +7,30 @@
   <link rel="stylesheet" href="./styles.css" />
 </head>
 <body class="flex flex-col h-screen">
-  <header class="bg-gray-800 text-gray-200 p-4 flex justify-between items-center">
+  <header class="bg-gray-800 text-gray-200 p-2 flex justify-between items-center h-[52px]">
     <div class="flex items-center space-x-2">
       <a href="/" class="text-lg font-bold text-white">Minimalist Safe{Wallet}</a>
       <span id="safe-address-display" class="text-gray-400 text-sm"></span>
     </div>
-    <div class="flex items-center space-x-4">
+    <div class="flex flex-col sm:flex-row items-end sm:items-center space-y-1 sm:space-y-0 sm:space-x-3">
       <span id="signer-address-display" class="text-gray-400 text-sm"></span>
-      <div id="dapp-connection-indicator" class="hidden">
-        <div class="flex items-center space-x-2 bg-gray-700 px-2 py-1 rounded">
-          <img id="dapp-icon" src="" alt="dApp" class="w-4 h-4 rounded-full">
-          <span id="dapp-name" class="text-xs text-gray-300"></span>
+      <div id="dapp-connection-indicator" class="hidden h-[40px]">
+        <div class="flex items-center space-x-2 h-full">
+          <div class="relative flex items-center">
+            <svg class="w-6 h-6 text-gray-300" viewBox="0 0 96 96" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M25.322 33.597c12.525-12.263 32.83-12.263 45.355 0l1.507 1.476a1.547 1.547 0 0 1 0 2.22l-5.156 5.048a.814.814 0 0 1-1.134 0l-2.074-2.03c-8.737-8.555-22.903-8.555-31.64 0l-2.222 2.175a.814.814 0 0 1-1.134 0l-5.156-5.049a1.547 1.547 0 0 1 0-2.22l1.654-1.62Zm56.019 10.44 4.589 4.494a1.547 1.547 0 0 1 0 2.22l-20.693 20.26a1.628 1.628 0 0 1-2.267 0L48.283 56.632a.407.407 0 0 0-.567 0L33.03 71.011a1.628 1.628 0 0 1-2.267 0L10.07 50.75a1.547 1.547 0 0 1 0-2.22l4.59-4.494a1.628 1.628 0 0 1 2.266 0l14.687 14.38c.156.153.41.153.567 0l14.685-14.38a1.628 1.628 0 0 1 2.267 0l14.687 14.38c.156.153.41.153.567 0l14.686-14.38a1.628 1.628 0 0 1 2.267 0Z" fill="currentColor"/>
+            </svg>
+            <img id="dapp-icon" src="" alt="dApp" class="absolute -bottom-1.5 -right-1.5 w-5 h-5 rounded-full border border-gray-700 bg-gray-800">
+          </div>
+          <span id="dapp-name" class="text-gray-300 text-base truncate max-w-[120px]"></span>
         </div>
       </div>
-      <div class="relative hidden" id="header-network-container">
-        <select id="header-network-select" disabled class="h-[32px] pl-3 pr-8 text-gray-400 bg-[#2c2c2c] border border-gray-700 rounded-lg focus:outline-none appearance-none cursor-not-allowed text-sm">
+      <div class="relative hidden h-[40px]" id="header-network-container">
+        <select id="header-network-select" disabled class="h-full pl-3 pr-8 text-gray-400 bg-gray-800 focus:outline-none appearance-none cursor-not-allowed text-base">
           <option value="mainnet">Ethereum</option>
         </select>
         <div class="absolute inset-y-0 right-0 flex items-center pr-2 pointer-events-none">
-          <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
           </svg>
         </div>
