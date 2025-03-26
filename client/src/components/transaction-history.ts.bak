@@ -173,6 +173,12 @@ export class TransactionHistory {
       this.excludeMalicious = toggleCheckbox.checked;
       this.transactionPage = 0; // Reset to first page when filtering changes
       await this.render(this.goToWalletInfoCallback!, this.onTransactionSelectCallback!);
+      
+      // After rendering, make sure the checkbox state is correctly set
+      const updatedToggle = document.querySelector('#malicious-toggle') as HTMLInputElement;
+      if (updatedToggle) {
+        updatedToggle.checked = this.excludeMalicious;
+      }
     });
     
     titleBar.appendChild(titleDiv);
@@ -412,15 +418,25 @@ export class TransactionHistory {
       const nextButton = document.createElement('button');
       nextButton.className = 'px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded transition-colors';
       nextButton.textContent = 'Next';
-      nextButton.disabled = filteredTransactions.length < this.transactionsPerPage;
+      
+      // Fix for pagination issue when hiding malicious transactions
+      // When filtering malicious transactions, we need to check if we received
+      // the maximum number of transactions we requested, not just the filtered count
+      const fetchedMaxTransactions = filteredTransactions.length === this.transactionsPerPage;
+      nextButton.disabled = !fetchedMaxTransactions;
+      
       if (nextButton.disabled) {
         nextButton.classList.add('opacity-50', 'cursor-not-allowed');
       }
       nextButton.addEventListener('click', async () => {
-        if (filteredTransactions.length >= this.transactionsPerPage) {
+        if (fetchedMaxTransactions) {
           this.transactionPage++;
+          // Store the current filter state when changing pages
+          const currentExcludeMalicious = this.excludeMalicious;
           // Use consistent callbacks
           await this.render(this.goToWalletInfoCallback!, this.onTransactionSelectCallback!);
+          // Make sure the filter state remains the same after rendering
+          this.excludeMalicious = currentExcludeMalicious;
         } else {
           // Show notification that there are no more transactions
           const notification = document.createElement('div');
@@ -658,368 +674,4 @@ export class TransactionHistory {
               <span class="font-mono mx-1">${truncateAddress(isOutgoing ? change.to : change.from)}</span>
             </div>
             <div class="font-medium">${formattedValue} ${change.tokenSymbol}</div>
-          `;
-          
-          stateChangesContainer.appendChild(changeRow);
-        });
-        
-        infoGrid.appendChild(stateChangesContainer);
-      }
-    }
-    
-    // After the existing info grid display, add security analysis section
-    detailsContainer.appendChild(infoGrid);
-    
-    // Add transaction data section if available
-    if (tx.data && tx.data !== '0x') {
-      const dataContainer = document.createElement('div');
-      dataContainer.className = 'mt-6';
-      
-      const dataTitle = document.createElement('h4');
-      dataTitle.className = 'text-md font-medium text-gray-300 mb-2';
-      dataTitle.textContent = 'Transaction Data';
-      dataContainer.appendChild(dataTitle);
-      
-      const dataValue = document.createElement('div');
-      dataValue.className = 'font-mono text-xs bg-gray-900 p-3 rounded-lg overflow-x-auto';
-      
-      // Truncate data if it's too long
-      const displayData = tx.data.length > 200 ? tx.data.substring(0, 200) + '...' : tx.data;
-      dataValue.textContent = displayData;
-      
-      // Add copy button
-      const copyBtn = document.createElement('button');
-      copyBtn.className = 'mt-2 text-xs text-blue-400 hover:text-blue-300 flex items-center';
-      copyBtn.innerHTML = `
-        <svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"></path>
-        </svg>
-        Copy Full Data
-      `;
-      copyBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        navigator.clipboard.writeText(tx.data);
-        
-        // Show feedback
-        const originalText = copyBtn.innerHTML;
-        copyBtn.innerHTML = 'Copied!';
-        copyBtn.disabled = true;
-        
-        setTimeout(() => {
-          copyBtn.innerHTML = originalText;
-          copyBtn.disabled = false;
-        }, 2000);
-      });
-      
-      dataContainer.appendChild(dataValue);
-      dataContainer.appendChild(copyBtn);
-      
-      detailsContainer.appendChild(dataContainer);
-    }
-    
-    // Add security analysis section if available
-    if (tx.analysis) {
-      const securityTitle = document.createElement('h4');
-      securityTitle.className = 'text-md font-medium text-gray-300 mt-8 mb-4';
-      securityTitle.textContent = 'Security Analysis';
-      detailsContainer.appendChild(securityTitle);
-      
-      const securityContainer = document.createElement('div');
-      securityContainer.className = 'bg-gray-900/50 rounded-lg border border-gray-700 p-4';
-      
-      const statusColor = tx.analysis.isMalicious 
-        ? 'text-red-400' 
-        : tx.analysis.confidence > 0.3 
-          ? 'text-yellow-400' 
-          : 'text-green-400';
-      
-      securityContainer.innerHTML = `
-        <div class="flex items-center mb-3">
-          <span class="text-gray-400 mr-2">Status:</span>
-          <span class="${statusColor} font-medium">${tx.analysis.isMalicious ? 'Malicious' : 'Safe'}</span>
-        </div>
-        <div class="flex items-center mb-3">
-          <span class="text-gray-400 mr-2">Confidence:</span>
-          <div class="relative h-4 w-full bg-gray-700 rounded-full overflow-hidden">
-            <div class="absolute top-0 left-0 h-full bg-blue-600" style="width: ${Math.round(tx.analysis.confidence * 100)}%"></div>
-          </div>
-          <span class="ml-2 text-sm">${Math.round(tx.analysis.confidence * 100)}%</span>
-        </div>
-        <div class="mb-3">
-          <span class="text-gray-400">Reason:</span>
-          <p class="mt-1 text-gray-300 text-sm">${tx.analysis.reason}</p>
-        </div>
-      `;
-      
-      detailsContainer.appendChild(securityContainer);
-    }
-    
-    container.appendChild(detailsContainer);
-    
-    // Add transaction execution section for future transactions
-    if (!tx.isExecuted && tx.safeTxHash && onExecuteTransaction) {
-      const executionContainer = document.createElement('div');
-      executionContainer.className = 'bg-gray-800 rounded-lg border border-gray-700 shadow-lg p-6';
-      
-      const executionTitle = document.createElement('h3');
-      executionTitle.className = 'text-lg font-medium text-gray-300 mb-4';
-      executionTitle.textContent = 'Execute Transaction';
-      executionContainer.appendChild(executionTitle);
-      
-      const executionDescription = document.createElement('p');
-      executionDescription.className = 'text-sm text-gray-400 mb-4';
-      executionDescription.textContent = 'This transaction has not been executed yet. Click the button below to execute it.';
-      executionContainer.appendChild(executionDescription);
-      
-      const executeButton = document.createElement('button');
-      executeButton.className = 'px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded transition-colors';
-      executeButton.textContent = 'Execute Transaction';
-      executeButton.addEventListener('click', () => {
-        onExecuteTransaction(tx.safeTxHash);
-      });
-      executionContainer.appendChild(executeButton);
-      
-      container.appendChild(executionContainer);
-    }
-    
-    // Add keyboard help text
-    const keyboardHelp = document.createElement('div');
-    keyboardHelp.className = 'text-center text-gray-500 text-xs mt-4';
-    keyboardHelp.innerHTML = `
-      <div class="mb-2">Keyboard navigation:</div>
-      <div><kbd class="px-2 py-1 bg-gray-700 rounded text-gray-300">Esc</kbd> Back to transaction list</div>
-    `;
-    container.appendChild(keyboardHelp);
-    
-    // Add container to buffer
-    this.buffer.appendChild(container);
-  }
-
-  /**
-   * Helper method to add a detail row to the transaction details
-   */
-  private addDetailRow(
-    container: HTMLElement, 
-    label: string, 
-    value: string, 
-    isCopyable: boolean = false
-  ): void {
-    const detail = document.createElement('div');
-      
-      const labelEl = document.createElement('div');
-      labelEl.className = 'text-sm font-medium text-gray-500';
-      labelEl.textContent = label;
-      detail.appendChild(labelEl);
-      
-      const valueContainer = document.createElement('div');
-      valueContainer.className = 'flex items-center mt-1';
-      
-      const valueEl = document.createElement('div');
-      valueEl.className = 'text-sm text-gray-300';
-    if (label === 'Transaction Hash' || label === 'Executed Hash' || label === 'From' || label === 'To' || label === 'Token Contract') {
-        valueEl.className += ' font-mono';
-      }
-      
-        valueEl.textContent = value;
-      valueContainer.appendChild(valueEl);
-      
-      if (isCopyable) {
-        const copyButton = document.createElement('button');
-        copyButton.className = 'ml-2 text-gray-500 hover:text-blue-400';
-      copyButton.innerHTML = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"></path></svg>';
-        copyButton.title = 'Copy to clipboard';
-        copyButton.addEventListener('click', () => {
-          navigator.clipboard.writeText(value).then(() => {
-            copyButton.innerHTML = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>';
-            setTimeout(() => {
-            copyButton.innerHTML = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"></path></svg>';
-            }, 2000);
-          });
-        });
-        valueContainer.appendChild(copyButton);
-      }
-      
-      detail.appendChild(valueContainer);
-    container.appendChild(detail);
-  }
-
-  /**
-   * Sets the current page of transactions
-   * @param page The page number (0-based)
-   */
-  public setPage(page: number): void {
-    this.transactionPage = page;
-  }
-
-  /**
-   * Gets the current page of transactions
-   * @returns The current page number (0-based)
-   */
-  public getPage(): number {
-    return this.transactionPage;
-  }
-
-  /**
-   * Get the native token symbol for the current network
-   */
-  private getNativeTokenSymbol(): string {
-    const symbolMap: Record<number, string> = {
-      1: 'ETH',      // Ethereum
-      5: 'GoerliETH', // Goerli
-      11155111: 'SepETH', // Sepolia
-      137: 'MATIC',  // Polygon
-      80001: 'MATIC', // Mumbai
-      10: 'ETH',     // Optimism
-      8453: 'ETH',   // Base
-      100: 'xDAI',   // Gnosis
-    };
-    return symbolMap[this.selectedNetwork.chainId] || 'ETH';
-  }
-
-  /**
-   * Setup keyboard navigation for transaction list and details
-   */
-  private setupKeyboardNavigation(): void {
-    // Remove any existing keyboard listener first
-    this.removeKeyboardListener();
-    
-    // Create keyboard event listener for global navigation
-    this.keyboardListener = (e: KeyboardEvent) => {
-      // Different behavior based on whether we're in list or details view
-      if (this.isDetailsView) {
-        // Details view keyboard navigation
-        if (e.key === 'Escape' && this.onBackClickCallback) {
-          e.preventDefault();
-          this.onBackClickCallback();
-        }
-      } else {
-        // List view keyboard navigation
-        switch (e.key) {
-          case 'ArrowUp':
-          case 'k': // vim-style up
-            e.preventDefault();
-            if (this.selectedRowIndex > 0) {
-              this.selectedRowIndex--;
-              this.highlightRow(this.selectedRowIndex);
-            }
-            break;
-            
-          case 'ArrowDown':
-          case 'j': // vim-style down
-            e.preventDefault();
-            if (this.selectedRowIndex < this.transactions.length - 1) {
-              this.selectedRowIndex++;
-              this.highlightRow(this.selectedRowIndex);
-            }
-            break;
-            
-          case 'Enter':
-            e.preventDefault();
-            if (this.transactions.length > 0 && this.onTransactionSelectCallback) {
-              // When a transaction is selected, store the current page
-              const currentTx = this.transactions[this.selectedRowIndex];
-              if (currentTx) {
-                this.onTransactionSelectCallback(currentTx);
-              }
-            }
-            break;
-            
-          case 'ArrowLeft':
-          case 'h': // vim-style left
-            e.preventDefault();
-            if (this.transactionPage > 0) {
-              this.transactionPage--;
-              if (this.goToWalletInfoCallback && this.onTransactionSelectCallback) {
-                this.render(this.goToWalletInfoCallback, this.onTransactionSelectCallback);
-              }
-            }
-            break;
-            
-          case 'ArrowRight':
-          case 'l': // vim-style right
-            e.preventDefault();
-            if (this.transactions.length >= this.transactionsPerPage) {
-              this.transactionPage++;
-              if (this.goToWalletInfoCallback && this.onTransactionSelectCallback) {
-                this.render(this.goToWalletInfoCallback, this.onTransactionSelectCallback);
-              }
-            }
-            break;
-        }
-      }
-    };
-    
-    // Add the keyboard event listener with capture phase
-    document.addEventListener('keydown', this.keyboardListener, true);
-  }
-  
-  /**
-   * Remove keyboard event listener
-   */
-  private removeKeyboardListener(): void {
-    if (this.keyboardListener) {
-      // Make sure to remove with the same capture phase parameter
-      document.removeEventListener('keydown', this.keyboardListener, true);
-      this.keyboardListener = null;
-    }
-  }
-  
-  /**
-   * Highlight a specific row in the transaction table
-   */
-  private highlightRow(index: number): void {
-    // Remove highlight from all rows
-    const allRows = document.querySelectorAll('#transaction-table tbody tr');
-    allRows.forEach(row => {
-      row.classList.remove('bg-gray-600'); // Removed darker background
-      row.classList.remove('bg-blue-900/30'); // Removed blue tint
-      row.classList.remove('border-blue-500');
-      row.classList.remove('border-l-4');
-      // Reset the even/odd row coloring
-      const rowIndex = parseInt(row.getAttribute('data-index') || '0', 10);
-      row.className = rowIndex % 2 === 0 ? 'bg-gray-800' : 'bg-gray-800/50';
-      row.classList.add('hover:bg-gray-700/50', 'cursor-pointer', 'border-b', 'border-gray-700');
-    });
-    
-    // Add highlight to the selected row with a lighter color
-    const selectedRow = document.querySelector(`#transaction-table tbody tr[data-index="${index}"]`) as HTMLElement;
-    if (selectedRow) {
-      selectedRow.classList.add('bg-blue-900/30'); // Light blue highlight
-      selectedRow.classList.add('border-blue-500');
-      selectedRow.classList.add('border-l-4');
-      
-      // Focus the row directly if it exists
-      selectedRow.focus();
-      
-      // Scroll the row into view if needed
-      selectedRow.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-    }
-  }
-  
-  /**
-   * Clean up resources when component is destroyed
-   */
-  public destroy(): void {
-    this.removeKeyboardListener();
-  }
-
-  // Set up the transaction row click event with the right page tracking
-  private setupTransactionRowClick(tx: BlockchainTransaction, index: number, tr: HTMLElement): void {
-    // Add click event listener
-    tr.addEventListener('click', () => {
-      this.selectedRowIndex = index;
-      // Always use the transaction callback
-      this.onTransactionSelectCallback!(tx);
-    });
-    
-    // Also add keyboard event handlers to each row
-    tr.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        this.selectedRowIndex = index;
-        // Always use the transaction callback
-        this.onTransactionSelectCallback!(tx);
-      }
-    });
-  }
-} 
+          `
