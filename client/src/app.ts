@@ -3251,36 +3251,103 @@ class VimApp {
 
       // Create container with consistent styling
       const formContainer = document.createElement('div');
-      formContainer.className = 'max-w-2xl mx-auto bg-gray-800 p-6 rounded-lg border border-gray-700 shadow-lg';
+      formContainer.className = 'max-w-2xl mx-auto bg-gray-800 p-6 rounded-lg border border-gray-700 shadow-lg mt-10';
 
-      // Create form title
+      // Add WalletConnect logo
+      const logoContainer = document.createElement('div');
+      logoContainer.className = 'flex justify-center mb-6';
+      const logo = document.createElement('img');
+      logo.className = 'w-20 h-auto object-contain';
+      logo.src = 'https://raw.githubusercontent.com/WalletConnect/walletconnect-assets/master/Logo/Blue%20(Default)/Logo.png';
+      logo.alt = 'WalletConnect Logo';
+      logoContainer.appendChild(logo);
+      formContainer.appendChild(logoContainer);
+
+      // Create form title with Safe{Wallet} styling
       const title = document.createElement('h3');
-      title.className = 'text-xl font-bold text-white mb-6';
-      title.textContent = 'Connect to dApp';
+      title.className = 'text-2xl font-bold text-white mb-2 text-center';
+      title.textContent = 'Connect dApps to Safe{Wallet}';
 
       // Add descriptive text
       const description = document.createElement('p');
-      description.className = 'text-gray-400 text-sm mb-6';
-      description.textContent = 'Enter a WalletConnect URI to connect to an external dApp.';
+      description.className = 'text-gray-400 text-sm mb-8 text-center';
+      description.textContent = 'Paste the pairing code below to connect to your Safe{Wallet} via WalletConnect';
 
+      // Create form
       const form = document.createElement('form');
       form.id = 'wdUriForm';
       form.className = 'space-y-6';
 
-      const fieldContainer = document.createElement('div');
-      fieldContainer.className = 'relative';
+      // Create input container styled like Safe Account input
+      const inputContainer = document.createElement('div');
+      inputContainer.className = 'relative flex-grow';
 
-      const label = document.createElement('label');
-      label.htmlFor = 'wdUri';
-      label.className = 'block text-sm font-medium text-gray-300 mb-1';
-      label.textContent = 'WalletConnect URI';
-
+      // Create the actual input element with wc: placeholder
       const input = document.createElement('input');
       input.type = 'text';
       input.id = 'wdUri';
-      input.className = 'w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent';
-      input.placeholder = 'wc:...';
+      input.className = 'block px-4 py-4 w-full text-white bg-[#2c2c2c] rounded-lg border border-gray-700 appearance-none focus:outline-none focus:ring-0 focus:border-green-600 peer cursor-pointer';
+      input.placeholder = 'wc:';
       input.required = true;
+      inputContainer.appendChild(input);
+
+      // Create the floating label
+      const label = document.createElement('label');
+      label.htmlFor = 'wdUri';
+      label.className = 'absolute text-sm text-gray-400 duration-300 transform -translate-y-6 scale-75 top-2 z-10 origin-[0] bg-[#2c2c2c] px-2 peer-focus:px-2 peer-focus:text-green-500 left-1';
+      label.textContent = 'Pairing code';
+      inputContainer.appendChild(label);
+
+      // Add paste button inside the input
+      const pasteButton = document.createElement('button');
+      pasteButton.className = 'absolute inset-y-0 right-0 flex items-center px-4 bg-green-500 hover:bg-green-600 text-white font-medium transition-colors duration-200 rounded-r-lg';
+      pasteButton.textContent = 'Paste';
+      pasteButton.type = 'button';
+      inputContainer.appendChild(pasteButton);
+      
+      // Add input event to check for pastes via keyboard shortcuts
+      input.addEventListener('input', (e) => {
+        // Check if input value changed rapidly (likely from paste)
+        if (input.value.trim().length > 3) {
+          // Auto-submit after short delay
+          setTimeout(() => {
+            if (input.value.trim()) {
+              console.log('Input detected from keyboard paste, auto-connecting...');
+              form.dispatchEvent(new Event('submit'));
+            }
+          }, 50);
+        }
+      });
+
+      // Add paste event handler to automatically connect after pasting
+      input.addEventListener('paste', (e) => {
+        // Short delay to allow the paste to complete
+        setTimeout(() => {
+          if (input.value.trim()) {
+            console.log('Paste event detected, auto-connecting...');
+            form.dispatchEvent(new Event('submit'));
+          }
+        }, 100);
+      });
+
+      // Add paste button click handler
+      pasteButton.onclick = async () => {
+        try {
+          const clipboardText = await navigator.clipboard.readText();
+          if (clipboardText.startsWith('wc:')) {
+            input.value = clipboardText.replace('wc:', '');
+          } else {
+            input.value = clipboardText;
+          }
+          // Auto-submit the form after pasting
+          if (input.value.trim()) {
+            console.log('Paste button clicked, auto-connecting...');
+            form.dispatchEvent(new Event('submit'));
+          }
+        } catch (err) {
+          console.error('Failed to read clipboard:', err);
+        }
+      };
 
       // Add keydown event listener for : key
       input.addEventListener('keydown', function(this: HTMLElement, e: Event) {
@@ -3294,21 +3361,8 @@ class VimApp {
         }
       });
 
-      fieldContainer.appendChild(label);
-      fieldContainer.appendChild(input);
-      form.appendChild(fieldContainer);
-
-      // Create action buttons section
-      const buttonContainer = document.createElement('div');
-      buttonContainer.className = 'flex justify-end gap-3 mt-6';
-
-      const submitButton = document.createElement('button');
-      submitButton.type = 'submit';
-      submitButton.className = 'px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-800';
-      submitButton.textContent = 'Connect';
-
-      buttonContainer.appendChild(submitButton);
-      form.appendChild(buttonContainer);
+      // Add input container to form
+      form.appendChild(inputContainer);
 
       // Add the elements to the container
       formContainer.appendChild(title);
@@ -3320,25 +3374,16 @@ class VimApp {
       form.addEventListener('submit', async (e) => {
         e.preventDefault();
         const inputElement = document.getElementById('wdUri') as HTMLInputElement;
-        const uri = inputElement.value.trim();
+        let uri = inputElement.value.trim();
         
-        // Make sure the URI starts with "wc:"
+        // Make sure the URI starts with "wc:" if not already
         if (!uri.startsWith('wc:')) {
-          // Remove any existing error message
-          const existingError = form.querySelector('.text-red-400');
-          if (existingError) {
-            existingError.remove();
-          }
-          
-          const errorMsg = document.createElement('p');
-          errorMsg.textContent = 'Invalid WalletConnect URI. URI must start with "wc:"';
-          errorMsg.className = 'text-red-400 mt-2';
-          form.appendChild(errorMsg);
-          return;
+          uri = 'wc:' + uri;
         }
         
         await this.connectWithWalletConnectUri(uri);
       });
+      
       return;
     }
 

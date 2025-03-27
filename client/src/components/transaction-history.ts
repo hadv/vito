@@ -190,16 +190,6 @@ export class TransactionHistory {
         noTxMessage.textContent = 'No blockchain transactions found for this Safe wallet address';
         container.appendChild(noTxMessage);
         
-        // Add back button for empty state
-        const backButton = document.createElement('button');
-        backButton.className = 'mt-6 px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded transition-colors';
-        backButton.textContent = 'Back to Safe Info';
-        backButton.addEventListener('click', () => {
-          if (this.goToWalletInfoCallback) {
-            this.goToWalletInfoCallback();
-          }
-        });
-        container.appendChild(backButton);
         return;
       }
 
@@ -360,18 +350,6 @@ export class TransactionHistory {
       helpText.className = 'text-center text-gray-500 text-xs mt-4';
       helpText.textContent = 'Click on a transaction to view details';
       container.appendChild(helpText);
-      
-      // Add back button
-      const backButton = document.createElement('button');
-      backButton.className = 'mt-6 px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded transition-colors';
-      backButton.textContent = 'Back to Safe Info';
-      backButton.addEventListener('click', () => {
-        // Go directly back to wallet info using the dedicated callback
-        if (this.goToWalletInfoCallback) {
-          this.goToWalletInfoCallback();
-        }
-      });
-      container.appendChild(backButton);
       
       // Add keyboard navigation instructions
       const keyboardHelp = document.createElement('div');
