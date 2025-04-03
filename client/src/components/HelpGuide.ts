@@ -1,4 +1,4 @@
-import { COMMANDS } from '../config/commands';
+import { COMMANDS } from '@/config/commands';
 
 export class HelpGuide {
   constructor(

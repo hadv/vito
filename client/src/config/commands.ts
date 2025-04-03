@@ -1,4 +1,4 @@
-import { Command } from '../types/ui';
+import { Command } from '@/types/ui';
 
 export const COMMANDS: Command[] = [
   { cmd: ':c', desc: 'Connect a Safe wallet' },

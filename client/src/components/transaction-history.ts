@@ -1,4 +1,4 @@
-import { BlockchainTransaction } from '../types';
+import { BlockchainTransaction } from '@/types';
 import { ethers } from 'ethers';
 
 /**
