@@ -8,7 +8,8 @@ import { NETWORKS, DEFAULT_NETWORK, getNetworkConfig, getContractAddress, getExp
 import { SafeTxPool } from './managers/transactions';
 import { PriceOracle } from './services/oracle';
 import { TransactionService } from './services/transaction';
-import { HelpGuide, TransactionHistory } from './components';
+import { HelpGuide, TransactionHistory, WalletConnectUI } from './components';
+import { WalletConnectService } from './services/wallet-connect';
 
 class VimApp {
   private buffer: HTMLDivElement;
@@ -47,6 +48,8 @@ class VimApp {
   private transactionService = new TransactionService();
   private transactionPage = 0;
   private transactionHistory: TransactionHistory | null = null;
+  private walletConnectService: WalletConnectService = new WalletConnectService();
+  private walletConnectUI: WalletConnectUI | null = null;
 
   constructor() {
     this.buffer = document.getElementById('buffer') as HTMLDivElement;
@@ -153,6 +156,11 @@ class VimApp {
         this.provider = new ethers.JsonRpcProvider(this.selectedNetwork.provider);
       });
     }
+
+    // Removed duplicate initialization: this.walletConnectService = new WalletConnectService();
+    
+    // Add WalletConnect event listeners
+    this.setupWalletConnectServiceListeners();
   }
 
   private initEventListeners(): void {
@@ -352,8 +360,8 @@ class VimApp {
         throw new Error(`Safe does not exist on ${this.selectedNetwork.displayName}`);
       }
 
-      // Initialize WalletConnect with the correct chain ID
-      await this.initializeWalletConnect(this.selectedNetwork.chainId);
+      // Removed automatic WalletConnect initialization
+      // WalletConnect should be initialized only when the user explicitly requests it with :wc
 
       // Store the Safe address
       this.safeAddress = safeAddress;
@@ -431,47 +439,34 @@ class VimApp {
     }
   }
 
-  private setupWalletConnectListeners(): void {
-    if (!this.signClient) return;
-    
-    // Listen for session deletion events (disconnections)
-    this.signClient.on('session_delete', ({ topic }: { topic: string }) => {
-      console.log(`WalletConnect session deleted: ${topic}`);
-      
-      // Only handle if it's our current session
-      if (this.sessionTopic === topic) {
-        this.handleWalletDisconnect();
+  private setupWalletConnectServiceListeners(): void {
+    // Handle session connection
+    this.walletConnectService.addEventListener('session_connected', (data: any) => {
+      if (data.address) {
+        this.signerAddress = data.address;
+        this.updateSignerDisplay();
       }
     });
     
-    // Listen for session expiration events
-    this.signClient.on('session_expire', ({ topic }: { topic: string }) => {
-      console.log(`WalletConnect session expired: ${topic}`);
-      
-      // Only handle if it's our current session
-      if (this.sessionTopic === topic) {
-        this.handleWalletDisconnect();
+    // Handle session deletion or expiry
+    this.walletConnectService.addEventListener('session_delete', () => {
+      this.handleWalletDisconnect();
+    });
+    
+    this.walletConnectService.addEventListener('session_expire', () => {
+      this.handleWalletDisconnect();
+    });
+    
+    // Handle dApp connection
+    this.walletConnectService.addEventListener('dapp_connected', (data: any) => {
+      if (data.metadata) {
+        this.updateDAppConnectionIndicator(data.metadata);
       }
     });
     
-    // Listen for connection events
-    this.signClient.on('session_event', (event: any) => {
-      console.log('WalletConnect session event:', event);
-      
-      // Handle specific events like accountsChanged if needed
-      if (event.name === 'accountsChanged' && this.sessionTopic === event.topic) {
-        // Update connected account if it changed
-        if (event.data && event.data.length > 0) {
-          const newAddress = event.data[0].split(':')[2];
-          if (newAddress !== this.signerAddress) {
-            this.signerAddress = newAddress;
-            this.updateSignerDisplay();
-          }
-        } else {
-          // Account disconnected/switched to none
-          this.handleWalletDisconnect();
-        }
-      }
+    // Handle dApp disconnection
+    this.walletConnectService.addEventListener('dapp_disconnected', () => {
+      this.hideDAppConnectionIndicator();
     });
   }
   
@@ -490,49 +485,34 @@ class VimApp {
     // Clear the WalletConnect session state
     this.sessionTopic = null;
     this.signerAddress = null;
-    
-    // Update the UI - ensure signer address display is cleared
     this.signerAddressDisplay.textContent = '';
-    
-    // Display a message to the user
-    this.buffer.innerHTML = '';
-    const disconnectMessage = document.createElement('p');
-    disconnectMessage.textContent = 'Wallet disconnected';
-    disconnectMessage.className = 'text-yellow-400';
-    this.buffer.appendChild(disconnectMessage);
-    this.buffer.className = 'flex-1 p-4 overflow-y-auto';
-    
-    // Ensure command input is focused
-    setTimeout(() => {
-      this.commandInput.focus();
-    }, 100);
   }
 
   private async disconnectWallet(): Promise<void> {
-    if (this.signClient && this.sessionTopic) {
-      try {
-        await this.signClient.disconnect({
-          topic: this.sessionTopic,
-          reason: { code: 6000, message: 'User disconnected' },
-        });
-        
-        // Handle the disconnect state
-        this.handleWalletDisconnect();
-        
-        // Add a success message
-        this.buffer.innerHTML = '';
-        const successMessage = document.createElement('p');
-        successMessage.textContent = 'Wallet disconnected successfully';
-        successMessage.className = 'text-green-400';
-        this.buffer.appendChild(successMessage);
-      } catch (error: unknown) {
-        console.error('WalletConnect disconnection failed:', error);
-        this.buffer.textContent = `Error disconnecting wallet: ${error instanceof Error ? error.message : 'Unknown error'}`;
-        this.buffer.className = 'flex-1 p-4 overflow-y-auto text-red-500';
-      }
-    } else {
-      this.buffer.textContent = 'No WalletConnect session to disconnect';
-      this.buffer.className = 'flex-1 p-4 overflow-y-auto text-yellow-400';
+    try {
+      // Use the WalletConnect service to disconnect
+      await this.walletConnectService.disconnect();
+      
+      // Clear UI state
+      this.sessionTopic = null;
+      this.signerAddress = null;
+      this.signerAddressDisplay.textContent = '';
+      
+      // Show success message
+      this.buffer.innerHTML = '';
+      const successMsg = document.createElement('p');
+      successMsg.textContent = 'Wallet disconnected successfully.';
+      successMsg.className = 'text-green-400';
+      this.buffer.appendChild(successMsg);
+    } catch (error: any) {
+      console.error('WalletConnect disconnection failed:', error);
+      
+      // Show error message
+      this.buffer.innerHTML = '';
+      const errorMsg = document.createElement('p');
+      errorMsg.textContent = error.message || 'No WalletConnect session to disconnect';
+      errorMsg.className = 'text-red-500';
+      this.buffer.appendChild(errorMsg);
     }
   }
 
@@ -3058,187 +3038,25 @@ class VimApp {
   }
 
   private async initializeWalletConnect(chainId: number): Promise<void> {
-    // Prevent duplicate connection attempts by checking if already connecting
-    if (this.isConnecting) {
-      console.log('Wallet connection already in progress, ignoring duplicate request');
-      return;
-    }
-    
     try {
-      // Set connecting flag to prevent duplicate requests
-      this.isConnecting = true;
-      
-      // If there's an active session, verify it's still valid
-      if (this.sessionTopic && this.signClient) {
-        try {
-          const session = await this.signClient.session.get(this.sessionTopic);
-          if (session && session.expiry * 1000 > Date.now()) {
-            // Session is still valid
-            this.buffer.innerHTML = '';
-            const msg = document.createElement('p');
-            msg.textContent = 'Already connected to wallet!';
-            msg.className = 'text-green-400';
-            this.buffer.appendChild(msg);
-            return;
-          }
-        } catch (e) {
-          // Session not found or expired, clear it
-          this.sessionTopic = null;
-          this.signerAddress = null;
-          this.signerAddressDisplay.textContent = '';
-        }
+      // Initialize WalletConnect UI if not already done
+      if (!this.walletConnectUI) {
+        this.walletConnectUI = new WalletConnectUI(this.buffer, this.walletConnectService);
       }
-
-      // Initialize WalletConnect SignClient if not already initialized
-      if (!this.signClient) {
-    this.signClient = await SignClient.init({
-          projectId: import.meta.env.VITE_WALLET_CONNECT_PROJECT_ID,
-      metadata: {
-        name: 'Minimalist Safe{Wallet}',
-            description: 'A minimalist interface for Safe{Wallet}',
-            url: window.location.origin,
-            icons: ['https://walletconnect.com/walletconnect-logo.svg']
-          }
-        });
-
-        // Set up event listeners
-    this.setupWalletConnectListeners();
-      }
-
-      // Create connection
-      const connectResult = await this.signClient.connect({
-      requiredNamespaces: {
-        eip155: {
-          methods: [
-            'eth_sign',
-            'personal_sign',
-            'eth_signTypedData',
-              'eth_signTypedData_v4',
-              'eth_sendTransaction'
-          ],
-          chains: [`eip155:${chainId}`],
-            events: ['accountsChanged', 'chainChanged']
-          }
-        }
-      });
-
-      // Show QR code
-    this.buffer.innerHTML = '';
-    const qrContainer = document.createElement('div');
-      qrContainer.className = 'max-w-2xl mx-auto bg-gray-800 p-6 rounded-lg border border-gray-700 shadow-lg';
       
-      // Create title section
-      const titleSection = document.createElement('div');
-      titleSection.className = 'text-center mb-6';
+      // Initialize WalletConnect service with chain ID
+      await this.walletConnectService.initialize(chainId);
       
-      const title = document.createElement('h3');
-      title.className = 'text-xl font-bold text-white mb-2';
-      title.textContent = 'Connect Your Wallet';
+      // Update session-related properties
+      this.sessionTopic = this.walletConnectService.getSessionTopic();
       
-      const subtitle = document.createElement('p');
-      subtitle.className = 'text-gray-400 text-sm';
-      subtitle.textContent = 'Scan the QR code with your WalletConnect-enabled wallet';
-      
-      titleSection.appendChild(title);
-      titleSection.appendChild(subtitle);
-      qrContainer.appendChild(titleSection);
-      
-      // Create QR code section
-      const qrSection = document.createElement('div');
-      qrSection.className = 'flex flex-col items-center justify-center bg-gray-900 p-8 rounded-lg mb-6';
-      
-      const qrCanvas = document.createElement('canvas');
-      qrCanvas.className = 'bg-white p-4 rounded-lg shadow-lg';
-      qrSection.appendChild(qrCanvas);
-      qrContainer.appendChild(qrSection);
-
-      // Add copy link section
-      const copySection = document.createElement('div');
-      copySection.className = 'bg-gray-900 p-4 rounded-lg';
-      
-      const copyLabel = document.createElement('p');
-      copyLabel.className = 'text-sm font-medium text-gray-400 mb-3';
-      copyLabel.textContent = 'Or copy connection link';
-      copySection.appendChild(copyLabel);
-      
-      const copyContainer = document.createElement('div');
-      copyContainer.className = 'flex items-center gap-2';
-      
-      const copyInput = document.createElement('input');
-      copyInput.type = 'text';
-      copyInput.value = connectResult.uri;
-      copyInput.readOnly = true;
-      copyInput.className = 'flex-1 bg-gray-700 text-white px-3 py-2 rounded-lg text-sm font-mono border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer';
-      
-      const copyButton = document.createElement('button');
-      copyButton.className = 'bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors duration-200 flex-shrink-0 focus:outline-none focus:ring-2 focus:ring-blue-500';
-      copyButton.textContent = 'Copy';
-      
-      // Add copy functionality
-      copyButton.onclick = async () => {
-        try {
-          await navigator.clipboard.writeText(connectResult.uri);
-          copyButton.textContent = 'Copied!';
-          copyButton.className = 'bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors duration-200 flex-shrink-0 focus:outline-none focus:ring-2 focus:ring-green-500';
-          setTimeout(() => {
-            copyButton.textContent = 'Copy';
-            copyButton.className = 'bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors duration-200 flex-shrink-0 focus:outline-none focus:ring-2 focus:ring-blue-500';
-          }, 2000);
-        } catch (err) {
-          console.error('Failed to copy:', err);
-        }
-      };
-      
-      copyContainer.appendChild(copyInput);
-      copyContainer.appendChild(copyButton);
-      copySection.appendChild(copyContainer);
-      qrContainer.appendChild(copySection);
-      
-    this.buffer.appendChild(qrContainer);
-
-    // Generate QR code
-      await QRCode.toCanvas(qrCanvas, connectResult.uri, {
-        width: 300,
-        margin: 2,
-        color: {
-          dark: '#000000',
-          light: '#ffffff'
-        }
-      });
-
-      // Wait for approval
-      const session = await connectResult.approval();
-      this.sessionTopic = session.topic;
-
-      // Get the connected address
-      const account = session.namespaces.eip155.accounts[0].split(':')[2];
-      this.signerAddress = account;
-
-      // Update the signer display
-      await this.updateSignerDisplay();
-
-      // Clear QR code and show success message
-      this.buffer.innerHTML = '';
-      const successMsg = document.createElement('p');
-      successMsg.textContent = 'Wallet connected successfully!';
-      successMsg.className = 'text-green-400';
-      this.buffer.appendChild(successMsg);
-
     } catch (error: unknown) {
-      // Clear session state on error
-      this.sessionTopic = null;
-      this.signerAddress = null;
-      this.signerAddressDisplay.textContent = '';
-      
       console.error('WalletConnect initialization failed:', error);
       this.buffer.innerHTML = '';
       const errorMsg = document.createElement('p');
       errorMsg.textContent = `Error: ${error instanceof Error ? error.message : 'Unknown error'}`;
       errorMsg.className = 'text-red-500';
       this.buffer.appendChild(errorMsg);
-    } finally {
-      // Reset connecting flag
-      this.isConnecting = false;
     }
   }
 
