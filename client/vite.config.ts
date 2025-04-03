@@ -16,8 +16,7 @@ export default defineConfig({
       '@utils': path.resolve(__dirname, 'src/utils'),
       '@types': path.resolve(__dirname, 'src/types'),
       '@config': path.resolve(__dirname, 'src/config'),
-      '@managers': path.resolve(__dirname, 'src/managers'),
-      '@react-components': path.resolve(__dirname, 'src/react-components'),
+      '@managers': path.resolve(__dirname, 'src/managers')
     }
   }
 });

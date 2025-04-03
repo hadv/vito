@@ -29,8 +29,7 @@
       "@utils/*": ["src/utils/*"],
       "@types/*": ["src/types/*"],
       "@config/*": ["src/config/*"],
-      "@managers/*": ["src/managers/*"],
-      "@react-components/*": ["src/react-components/*"]
+      "@managers/*": ["src/managers/*"]
     }
   },
   "include": ["src"]
