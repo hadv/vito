@@ -1,4 +1,4 @@
-import { WalletConnectService } from '../services/wallet-connect';
+import { WalletConnectService } from '@/services/wallet-connect';
 
 /**
  * WalletConnectUI component to handle wallet connect session UI

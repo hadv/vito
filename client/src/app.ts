@@ -1,15 +1,14 @@
-import QRCode from 'qrcode';
 import { io, Socket } from 'socket.io-client';
 import { ethers } from 'ethers';
 import { SignClient } from '@walletconnect/sign-client';
-import { SafeInfo, NetworkConfig, Token, BlockchainTransaction } from './types';
-import { truncateAddress, resolveEnsName, prepareTransactionRequest, calculateSafeTxHash, formatSafeSignatures, getSafeNonce, getSafeTxHashFromContract } from './utils';
-import { NETWORKS, DEFAULT_NETWORK, getNetworkConfig, getContractAddress, getExplorerUrl } from './config';
-import { SafeTxPool } from './managers/transactions';
-import { PriceOracle } from './services/oracle';
-import { TransactionService } from './services/transaction';
-import { HelpGuide, TransactionHistory, WalletConnectUI } from './components';
-import { WalletConnectService } from './services/wallet-connect';
+import { SafeInfo, NetworkConfig, Token, BlockchainTransaction } from '@/types';
+import { truncateAddress, resolveEnsName, prepareTransactionRequest, calculateSafeTxHash, formatSafeSignatures, getSafeNonce, getSafeTxHashFromContract } from '@/utils';
+import { NETWORKS, DEFAULT_NETWORK, getNetworkConfig, getContractAddress, getExplorerUrl } from '@/config';
+import { SafeTxPool } from '@/managers/transactions';
+import { PriceOracle } from '@/services/oracle';
+import { TransactionService } from '@/services/transaction';
+import { HelpGuide, TransactionHistory, WalletConnectUI } from '@/components';
+import { WalletConnectService } from '@/services/wallet-connect';
 
 class VimApp {
   private buffer: HTMLDivElement;
@@ -3124,7 +3123,7 @@ class VimApp {
       inputContainer.appendChild(pasteButton);
       
       // Add input event to check for pastes via keyboard shortcuts
-      input.addEventListener('input', (e) => {
+      input.addEventListener('input', () => {
         // Check if input value changed rapidly (likely from paste)
         if (input.value.trim().length > 3) {
           // Auto-submit after short delay
@@ -3138,7 +3137,7 @@ class VimApp {
       });
 
       // Add paste event handler to automatically connect after pasting
-      input.addEventListener('paste', (e) => {
+      input.addEventListener('paste', () => {
         // Short delay to allow the paste to complete
         setTimeout(() => {
           if (input.value.trim()) {

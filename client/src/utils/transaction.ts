@@ -1,6 +1,6 @@
 import { JsonRpcProvider, ethers } from 'ethers';
-import { TransactionRequest } from '../types/transaction';
-import { SafeTransactionData } from '../types/safe';
+import { TransactionRequest } from '@/types/transaction';
+import { SafeTransactionData } from '@/types/safe';
 
 export async function prepareTransactionRequest({
   provider,

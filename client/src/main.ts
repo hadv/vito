@@ -1,3 +1,3 @@
-import VimApp from './app';
+import VimApp from '@/app';
 
 new VimApp();

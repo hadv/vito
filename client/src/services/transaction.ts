@@ -1,4 +1,4 @@
-import { BlockchainTransaction } from '../types';
+import { BlockchainTransaction } from '@/types';
 
 /**
  * Service for fetching blockchain transactions related to a Safe wallet address from Etherscan
