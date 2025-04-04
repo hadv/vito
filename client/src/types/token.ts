@@ -16,4 +16,4 @@ export interface Token {
   decimals: number;
   /** USD value of the token balance, if available */
   valueUsd?: number | null;
-} 
+}

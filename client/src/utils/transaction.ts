@@ -22,7 +22,7 @@ export async function prepareTransactionRequest({
   // Get fee data from the provider
   const feeData = await provider.getFeeData();
   console.log('Current fee data:', feeData);
-  
+
   // First estimate the gas
   const gasEstimate = await provider.estimateGas({
     from: signerAddress,
@@ -117,4 +117,4 @@ export const calculateSafeTxHash = (
     { SafeTx: typedData.types.SafeTx },
     typedData.message
   );
-}; 
+};

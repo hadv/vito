@@ -19,7 +19,7 @@ const EXPLORER_URLS: Record<number, string> = {
 
 /**
  * Get the blockchain explorer URL for a specific chain ID
- * 
+ *
  * @param chainId The blockchain network ID
  * @returns The base URL for the explorer
  */
@@ -27,4 +27,4 @@ export function getExplorerUrl(chainId: number): string {
   return EXPLORER_URLS[chainId] || 'https://etherscan.io';
 }
 
-export default EXPLORER_URLS; 
+export default EXPLORER_URLS;

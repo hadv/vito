@@ -1,4 +1,4 @@
-import { NetworkConfig } from '@/types/network';
+import { NetworkConfig } from '@/types';
 
 export const NETWORKS: { [key: string]: NetworkConfig } = {
   mainnet: {
@@ -29,4 +29,4 @@ export const DEFAULT_NETWORK = 'sepolia';
 // Helper function to get network config
 export function getNetworkConfig(name: string): NetworkConfig {
   return NETWORKS[name] || NETWORKS[DEFAULT_NETWORK];
-} 
+}

@@ -22,7 +22,7 @@ io.on('connection', (socket) => {
   socket.on('getSafeInfo', async (data) => {
     try {
       const { safeAddress, network, chainId, provider } = data;
-      
+
       if (!safeAddress) {
         socket.emit('error', { message: 'Missing Safe address' });
         return;
@@ -64,7 +64,7 @@ io.on('connection', (socket) => {
   socket.on('getPendingTransactions', async (data) => {
     try {
       const { safeAddress } = data;
-      
+
       if (!safeAddress) {
         socket.emit('error', { message: 'Missing Safe address' });
         return;
@@ -85,7 +85,7 @@ io.on('connection', (socket) => {
   socket.on('prepareTransaction', async (data) => {
     try {
       const { safeAddress, transaction, network, chainId, provider } = data;
-      
+
       if (!safeAddress || !transaction) {
         socket.emit('error', { message: 'Missing required parameters' });
         return;
@@ -154,11 +154,11 @@ io.on('connection', (socket) => {
   socket.on('submitSignature', async (data) => {
     try {
       const { network, chainId, provider } = data;
-      
+
       // Use the network-specific provider sent from the client
       const networkProvider = new ethers.JsonRpcProvider(provider);
-      
-      socket.emit('error', { 
+
+      socket.emit('error', {
         message: 'Signature submission is currently unavailable. This feature will be enabled when the Safe API service is live.'
       });
     } catch (error) {
@@ -171,11 +171,11 @@ io.on('connection', (socket) => {
   socket.on('executeTransaction', async (data) => {
     try {
       const { network, chainId, provider } = data;
-      
+
       // Use the network-specific provider sent from the client
       const networkProvider = new ethers.JsonRpcProvider(provider);
-      
-      socket.emit('error', { 
+
+      socket.emit('error', {
         message: 'Transaction execution is currently unavailable. This feature will be enabled when the Safe API service is live.'
       });
     } catch (error) {
@@ -195,4 +195,4 @@ server.listen(port, () => {
 });
 
 // Export for testing
-export { app, server, io }; 
+export { app, server, io };

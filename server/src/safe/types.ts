@@ -28,4 +28,4 @@ export interface SafeTransactionDataPartial {
   gasPrice: string;
   gasToken: string;
   refundReceiver: string;
-} 
+}

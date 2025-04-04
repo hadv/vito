@@ -9,4 +9,4 @@ export interface NetworkConfig {
   blockExplorer?: string;
   symbol?: string;
   isTestnet?: boolean;
-} 
+}

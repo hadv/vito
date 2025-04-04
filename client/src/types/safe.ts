@@ -28,4 +28,4 @@ export interface SafeTransaction extends SafeTransactionData {
   safe: string;
   proposer: string;
   signatures: string[];
-} 
+}

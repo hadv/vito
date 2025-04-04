@@ -27,4 +27,4 @@ export async function resolveEnsName(
     console.error(`Failed to resolve ENS for ${address}:`, error);
     return null;
   }
-} 
+}

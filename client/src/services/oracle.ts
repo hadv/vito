@@ -39,44 +39,44 @@ export class PriceOracle {
       if (!poolAddress) {
         throw new Error(`No Uniswap V3 pool configured for chain ID ${chainId}`);
       }
-      
+
       // ABI for just the slot0 function which gives us the current price
       const uniswapV3PoolABI = [
         'function slot0() external view returns (uint160 sqrtPriceX96, int24 tick, uint16 observationIndex, uint16 observationCardinality, uint16 observationCardinalityNext, uint8 feeProtocol, bool unlocked)'
       ];
-      
+
       // Create contract instance
       const poolContract = new ethers.Contract(
         poolAddress,
         uniswapV3PoolABI,
         provider
       );
-      
+
       // Get the current price data from slot0
       const slot0Data = await poolContract.slot0();
-      
+
       // Extract the sqrtPriceX96 value
       const sqrtPriceX96 = slot0Data[0];
-      
+
       // Convert sqrtPriceX96 to price
       // For ETH/USDC, we need to convert it to USDC price (considering decimals)
       // ETH has 18 decimals, USDC has 6 decimals
       // Formula: price = (sqrtPriceX96 / 2^96)^2 * (10^token1Decimals / 10^token0Decimals)
       const price = Number(
-        (BigInt(sqrtPriceX96.toString()) * BigInt(sqrtPriceX96.toString())) / 
-        (BigInt(2) ** BigInt(192)) * 
-        BigInt(10 ** (6 - 18)) / 
+        (BigInt(sqrtPriceX96.toString()) * BigInt(sqrtPriceX96.toString())) /
+        (BigInt(2) ** BigInt(192)) *
+        BigInt(10 ** (6 - 18)) /
         BigInt(1)
       );
-      
+
       // USDC/ETH price (how many USDC for 1 ETH)
       // We need to use 1/price because our pool gives USDC price in terms of ETH
       const ethPriceInUsdc = 1 / price;
-      
+
       return ethPriceInUsdc;
     } catch (error) {
       console.error('Error fetching ETH price from Uniswap:', error);
-      
+
       // Fallback to a secondary source if Uniswap fails
       try {
         const response = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd');
@@ -88,4 +88,4 @@ export class PriceOracle {
       }
     }
   }
-} 
+}
