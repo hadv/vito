@@ -119,9 +119,9 @@ export class SafeService {
       safeContract.nonce(),
       safeContract.getThreshold()
     ]);
-      console.log('Retrieved nonce and threshold:', { 
-        nonce: nonce.toString(), 
-        threshold: threshold.toString() 
+      console.log('Retrieved nonce and threshold:', {
+        nonce: nonce.toString(),
+        threshold: threshold.toString()
       });
 
       // Validate value format
@@ -370,7 +370,7 @@ export class SafeService {
       // In a real implementation, we would use a wallet to sign the transaction
       // For now, we'll just simulate adding the signature to our local storage
       console.log('Adding signature to SafeTxPool (simulated)');
-      
+
       // Return the updated signatures (simulated)
       const updatedSignatures = [...currentSignatures, signature];
       return { signatures: updatedSignatures };
@@ -453,7 +453,7 @@ export class SafeService {
       // In a real implementation, we would use a wallet to execute the transaction
       // For now, we'll just simulate execution
       console.log('Executing transaction (simulated)');
-      
+
       // Return a simulated transaction hash
       const transactionHash = `0x${Math.random().toString(16).substring(2)}`;
       return { transactionHash };

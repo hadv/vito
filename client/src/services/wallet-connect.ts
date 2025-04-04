@@ -37,7 +37,7 @@ export class WalletConnectService {
    */
   public removeEventListener(event: string, callback: Function): void {
     if (!this.listeners.has(event)) return;
-    
+
     const callbacks = this.listeners.get(event) || [];
     const index = callbacks.indexOf(callback);
     if (index !== -1) {
@@ -52,7 +52,7 @@ export class WalletConnectService {
    */
   private emit(event: string, data?: any): void {
     if (!this.listeners.has(event)) return;
-    
+
     const callbacks = this.listeners.get(event) || [];
     callbacks.forEach(callback => callback(data));
   }
@@ -115,11 +115,11 @@ export class WalletConnectService {
       console.log('Wallet connection already in progress, ignoring duplicate request');
       return;
     }
-    
+
     try {
       // Set connecting flag to prevent duplicate requests
       this.isConnecting = true;
-      
+
       // If there's an active session, verify it's still valid
       if (this.sessionTopic && this.signClient) {
         try {
@@ -178,14 +178,14 @@ export class WalletConnectService {
 
       // Get the connected address
       const account = session.namespaces.eip155.accounts[0].split(':')[2];
-      
+
       // Emit successful connection event
       this.emit('session_connected', { address: account, session });
 
     } catch (error: unknown) {
       // Clear session state on error
       this.sessionTopic = null;
-      
+
       console.error('WalletConnect initialization failed:', error);
       this.emit('session_error', { error });
     } finally {
@@ -218,7 +218,7 @@ export class WalletConnectService {
             }
           }
         });
-        
+
         return { uri: connectResult.uri };
       } catch (error) {
         console.error('Error creating WalletConnect connection:', error);
@@ -232,8 +232,8 @@ export class WalletConnectService {
 
     try {
       // Parse the URI
-      const pairResult = await this.signClient.pair({ uri });
-      
+      await this.signClient.pair({ uri });
+
       // Return the session URI
       return { uri };
     } catch (error) {
@@ -258,7 +258,7 @@ export class WalletConnectService {
           message: 'User disconnected'
         }
       });
-      
+
       // Reset the session topic
       this.sessionTopic = null;
       this.emit('session_disconnected', null);
@@ -320,14 +320,14 @@ export class WalletConnectService {
     try {
       // Pair with the provided URI
       const pairResult = await this.dAppClient.pair({ uri });
-      
+
       // Store the session topic
       if (pairResult && pairResult.topic) {
         this.dAppSessionTopic = pairResult.topic;
-        
+
         // Extract metadata from the pairing
         const dAppMetadata = pairResult.peer?.metadata;
-        
+
         this.emit('dapp_connected', { metadata: dAppMetadata });
       }
     } catch (error) {
@@ -351,4 +351,4 @@ export class WalletConnectService {
       }
     });
   }
-} 
+}

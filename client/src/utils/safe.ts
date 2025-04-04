@@ -14,10 +14,10 @@ export async function getSafeNonce(
   const safeAbi = [
     "function nonce() view returns (uint256)"
   ];
-  
+
   // Create contract instance
   const safeContract = new ethers.Contract(safeAddress, safeAbi, provider);
-  
+
   try {
     // Get nonce from contract
     const nonce = await safeContract.nonce();
@@ -52,10 +52,10 @@ export async function getSafeTxHashFromContract(
   const safeAbi = [
     "function getTransactionHash(address to, uint256 value, bytes data, uint8 operation, uint256 safeTxGas, uint256 baseGas, uint256 gasPrice, address gasToken, address refundReceiver, uint256 nonce) view returns (bytes32)"
   ];
-  
+
   // Create contract instance
   const safeContract = new ethers.Contract(safeAddress, safeAbi, provider);
-  
+
   try {
     // Get hash from contract
     const hash = await safeContract.getTransactionHash(
@@ -75,4 +75,4 @@ export async function getSafeTxHashFromContract(
     console.error('Error getting Safe transaction hash:', error);
     throw new Error('Failed to get Safe transaction hash');
   }
-} 
+}

@@ -7,17 +7,17 @@ async function bootstrap() {
   const logger = new Logger('Bootstrap');
   try {
     const app = await NestFactory.create(AppModule);
-    
+
     // Enable CORS for development
-    app.enableCors({ 
+    app.enableCors({
       origin: '*',
       methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
       credentials: true,
     });
-    
+
     // Add global exception logging
     app.useLogger(logger);
-    
+
     const configService = app.get(ConfigService);
     const port = configService.get<number>('PORT') || 3000;
     await app.listen(port);

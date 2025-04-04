@@ -44,7 +44,7 @@ export class SafeController {
   ) {
     try {
       console.log('Received prepare transaction request:', JSON.stringify(data, null, 2));
-      
+
       // Validate input data
       if (!data.safeAddress) {
         throw new Error('safeAddress is required');
@@ -77,7 +77,7 @@ export class SafeController {
         transaction.operation || 0,
         network,
       );
-      
+
       console.log('Transaction prepared successfully:', JSON.stringify(preparedTx, null, 2));
       return preparedTx;
     } catch (error) {

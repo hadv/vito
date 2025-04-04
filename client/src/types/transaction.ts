@@ -61,4 +61,4 @@ export interface BlockchainTransaction {
     value: string;
     isStateChange: boolean;
   }[];
-} 
+}

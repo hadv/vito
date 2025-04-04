@@ -24,14 +24,14 @@ export class TransactionController {
     @Query('offset', new DefaultValuePipe(0), ParseIntPipe) offset: number,
   ): Promise<{ transactions: SafeTransaction[] }> {
     this.logger.log(`Fetching transactions for Safe ${safeAddress} on chain ${chainId}`);
-    
+
     const transactions = await this.transactionService.getSafeTransactions(
       safeAddress,
       chainId,
       limit,
       offset,
     );
-    
+
     return { transactions };
   }
 
@@ -51,14 +51,14 @@ export class TransactionController {
     @Query('offset', new DefaultValuePipe(0), ParseIntPipe) offset: number,
   ): Promise<{ transactions: SafeTransaction[] }> {
     this.logger.log(`Fetching blockchain transactions for Safe ${safeAddress} on chain ${chainId}`);
-    
+
     const transactions = await this.transactionService.getBlockchainTransactions(
       safeAddress,
       chainId,
       limit,
       offset,
     );
-    
+
     return { transactions };
   }
-} 
+}

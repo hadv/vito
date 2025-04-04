@@ -37,4 +37,4 @@ export class BigIntSerializerInterceptor implements NestInterceptor {
 
     return data;
   }
-} 
+}

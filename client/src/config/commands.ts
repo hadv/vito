@@ -1,4 +1,4 @@
-import { Command } from '@/types/ui';
+import { Command } from '@/types';
 
 export const COMMANDS: Command[] = [
   { cmd: ':c', desc: 'Connect a Safe wallet' },
@@ -16,4 +16,4 @@ export const COMMANDS: Command[] = [
   { cmd: ':e', desc: 'Execute selected pending transaction' },
   { cmd: ':his', desc: 'View transaction history for the connected Safe wallet' },
   { cmd: ':dd', desc: 'Disconnect from current dApp' },
-]; 
+];

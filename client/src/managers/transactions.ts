@@ -1,7 +1,6 @@
 import { ethers } from 'ethers';
-import { NetworkConfig } from '@/types/network';
+import { NetworkConfig, SafeTransaction } from '@/types';
 import { SAFE_TX_POOL_ABI } from '@/config/contracts';
-import { SafeTransaction } from '@/types/safe';
 
 // Interface for the contract
 type SafeTxPoolContract = ethers.Contract & {
@@ -64,7 +63,7 @@ export class SafeTxPool {
     try {
       // Convert safeTxHash to bytes32 - if it's already a hex string, use it directly
       const txHashBytes32 = safeTxHash.startsWith('0x') ? safeTxHash : ethers.hexlify(safeTxHash);
-      
+
       // Handle value conversion properly - if it's already a hex string, use it directly
       let valueToUse = value;
       if (!value.startsWith('0x')) {
@@ -183,4 +182,4 @@ export class SafeTxPool {
     const contractWithSigner = this.contract.connect(signer) as SafeTxPoolContract;
     await contractWithSigner.markAsExecuted(txHash);
   }
-} 
+}

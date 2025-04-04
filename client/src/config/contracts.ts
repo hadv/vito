@@ -21,25 +21,25 @@ export const CONTRACT_ADDRESSES: { [key: string]: { safeTxPool: string } } = {
 export function getContractAddress(network: NetworkConfig): { safeTxPool: string } {
   // First try to get addresses for the network name
   const addresses = CONTRACT_ADDRESSES[network.name.toLowerCase()];
-  
+
   if (!addresses) {
     // For development networks, default to sepolia addresses
     if (network.chainId === 11155111 || network.name.includes('sepolia')) {
       return CONTRACT_ADDRESSES.sepolia;
     }
-    
+
     // For mainnet or mainnet forks
     if (network.chainId === 1 || network.name.includes('mainnet')) {
       return CONTRACT_ADDRESSES.mainnet;
     }
-    
+
     // For arbitrum networks
     if (network.chainId === 42161 || network.name.includes('arbitrum')) {
       return CONTRACT_ADDRESSES.arbitrum;
     }
-    
+
     throw new Error(`No contract addresses found for network ${network.name} (chainId: ${network.chainId})`);
   }
-  
+
   return addresses;
-} 
+}

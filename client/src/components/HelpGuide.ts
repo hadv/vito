@@ -1,4 +1,4 @@
-import { COMMANDS } from '@/config/commands';
+import { COMMANDS } from '@/config';
 
 export class HelpGuide {
   constructor(
@@ -26,7 +26,7 @@ export class HelpGuide {
 
     const modeList = document.createElement('ul');
     modeList.className = 'space-y-2';
-    
+
     const modes = [
       { key: 'e', desc: 'Switch to TX mode (requires connected wallet via :wc)' },
       { key: 'ESC', desc: 'Return to READ ONLY mode' }
@@ -76,7 +76,7 @@ export class HelpGuide {
 
   private showHelpContent(mainContainer: HTMLDivElement): void {
     const inputContainer = document.getElementById('input-container');
-    
+
     if (inputContainer) {
       // If input field is visible, show help in help-container
       this.helpContainer.appendChild(mainContainer);
@@ -84,7 +84,7 @@ export class HelpGuide {
       this.mainContent.classList.remove('hidden');
       this.buffer.classList.remove('hidden');
       this.helpScreen.classList.add('hidden');
-      
+
       // Update help container classes
       this.helpContainer.className = 'w-full sm:w-1/2 p-4';
     } else {
@@ -95,4 +95,4 @@ export class HelpGuide {
       this.buffer.classList.add('hidden');
     }
   }
-} 
+}

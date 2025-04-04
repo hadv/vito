@@ -55,16 +55,16 @@ interface TransactionCache {
 @Injectable()
 export class TransactionService {
   private readonly logger = new Logger(TransactionService.name);
-  
+
   // Etherscan API keys by chain ID
   private etherscanApiKeys: Record<number, string> = {};
-  
+
   // Etherscan API URLs by chain ID
   private etherscanApis: Record<number, string> = {};
 
   // In-memory cache for transactions to reduce API calls
   private txCache: Record<string, TransactionCache> = {};
-  
+
   // Cache timeout in milliseconds (5 minutes)
   private readonly CACHE_TIMEOUT = 5 * 60 * 1000;
 
@@ -85,7 +85,7 @@ export class TransactionService {
       8453: apiKey,
       100: apiKey,
     };
-    
+
     // Initialize Etherscan API URLs from environment variables
     this.etherscanApis = {
       1: this.configService.get<string>('ETHERSCAN_API_URL_MAINNET', 'https://api.etherscan.io/api'),
@@ -97,7 +97,7 @@ export class TransactionService {
       8453: this.configService.get<string>('ETHERSCAN_API_URL_BASE', 'https://api.basescan.org/api'),
       100: this.configService.get<string>('ETHERSCAN_API_URL_GNOSIS', 'https://api.gnosisscan.io/api'),
     };
-    
+
     this.logger.log('Initialized Etherscan API configurations');
   }
 
@@ -119,55 +119,55 @@ export class TransactionService {
       // Check cache first
       const cacheKey = `${safeAddress.toLowerCase()}-${chainId}-blockchain`;
       const cachedData = this.txCache[cacheKey];
-      
+
       // If we have cached data and enough transactions, use it
-      if (cachedData && 
-          Date.now() - cachedData.timestamp < this.CACHE_TIMEOUT && 
+      if (cachedData &&
+          Date.now() - cachedData.timestamp < this.CACHE_TIMEOUT &&
           cachedData.transactions.length > skip) { // Must have enough transactions to cover the skip
         this.logger.log(`Using cached blockchain transactions for ${safeAddress}`);
-        
+
         // Check if we have enough cached transactions to satisfy the request
         if (cachedData.transactions.length >= skip + first) {
           // We have enough data in cache for this page
           return cachedData.transactions.slice(skip, skip + first);
         }
       }
-      
+
       // Either no cache or not enough cached data - fetch from Etherscan
       const fetchLimit = Math.max(first * 3, 100); // Fetch more than needed to account for deduplication
       const transactions = await this.getBlockchainTransactionsFromEtherscan(
-        safeAddress, 
-        chainId, 
-        fetchLimit, 
+        safeAddress,
+        chainId,
+        fetchLimit,
         0 // Always fetch from beginning to properly deduplicate
       );
-      
+
       // Log if no transactions were found
       if (transactions.length === 0) {
         this.logger.log(`No blockchain transactions found via Etherscan for ${safeAddress}`);
         return [];
       }
-      
+
       // Store in cache
       this.txCache[cacheKey] = {
         transactions,
         timestamp: Date.now()
       };
       this.logger.log(`Cached ${transactions.length} blockchain transactions for ${safeAddress}`);
-      
+
       // Return the requested page
       const availableCount = transactions.length;
       if (skip >= availableCount) {
         return []; // No more transactions
       }
-      
+
       return transactions.slice(skip, Math.min(skip + first, availableCount));
     } catch (error) {
       this.logger.error(`Error fetching blockchain transactions: ${error.message}`, error.stack);
       return [];
     }
   }
-  
+
   /**
    * Fetch blockchain transactions via Etherscan API
    */
@@ -179,7 +179,7 @@ export class TransactionService {
   ): Promise<SafeTransaction[]> {
     const apiKey = this.etherscanApiKeys[chainId];
     const apiUrl = this.etherscanApis[chainId];
-    
+
     if (!apiKey || !apiUrl) {
       this.logger.error(`No Etherscan API configuration found for chain ID ${chainId}`);
       return [];
@@ -187,29 +187,29 @@ export class TransactionService {
 
     const safeAddressLowercase = safeAddress.toLowerCase();
     this.logger.log(`Fetching blockchain transactions for ${safeAddressLowercase} on chain ${chainId} from Etherscan`);
-    
+
     try {
       // We'll fetch both incoming and outgoing transactions
       const transactions: SafeTransaction[] = [];
       // Track transaction hashes to avoid duplicates
       const processedTxHashes = new Set<string>();
-      
+
       // First, fetch normal transactions (external)
       const normalTxUrl = `${apiUrl}?module=account&action=txlist&address=${safeAddressLowercase}&startblock=0&endblock=99999999&page=${Math.floor(offset/limit) + 1}&offset=${limit}&sort=desc&apikey=${apiKey}`;
-      
+
       const normalTxResponse = await fetch(normalTxUrl);
       const normalTxData = await normalTxResponse.json();
-      
+
       this.logger.log(`Received normal transaction data from Etherscan: ${JSON.stringify(normalTxData)}`);
-      
+
       // Process normal transactions if successful
       if (normalTxData.status === '1' && Array.isArray(normalTxData.result)) {
         for (const tx of normalTxData.result) {
           const isOutgoing = tx.from.toLowerCase() === safeAddressLowercase;
-          
+
           // Add to the set of processed tx hashes
           processedTxHashes.add(tx.hash.toLowerCase());
-          
+
           transactions.push({
             id: tx.hash,
             timestamp: parseInt(tx.timeStamp, 10),
@@ -239,30 +239,30 @@ export class TransactionService {
           });
         }
       }
-      
+
       // Next, fetch internal transactions
       const internalTxUrl = `${apiUrl}?module=account&action=txlistinternal&address=${safeAddressLowercase}&startblock=0&endblock=99999999&page=${Math.floor(offset/limit) + 1}&offset=${limit}&sort=desc&apikey=${apiKey}`;
-      
+
       const internalTxResponse = await fetch(internalTxUrl);
       const internalTxData = await internalTxResponse.json();
-      
+
       this.logger.log(`Received internal transaction data from Etherscan: ${JSON.stringify(internalTxData)}`);
-      
+
       // Process internal transactions if successful
       if (internalTxData.status === '1' && Array.isArray(internalTxData.result)) {
         for (const tx of internalTxData.result) {
           const isOutgoing = tx.from.toLowerCase() === safeAddressLowercase;
           const isIncoming = tx.to.toLowerCase() === safeAddressLowercase;
-          
+
           // Only process state changes for the safe address
           if (!isOutgoing && !isIncoming) continue;
-          
+
           // Check if this tx hash has already been processed
           const txHashLower = tx.hash.toLowerCase();
-          
+
           // Check if this internal tx is part of an existing transaction
           const existingTxIndex = transactions.findIndex(t => t.txHash.toLowerCase() === txHashLower);
-          
+
           if (existingTxIndex >= 0) {
             // Add this as a state change to the existing transaction
             transactions[existingTxIndex].stateChanges.push({
@@ -277,7 +277,7 @@ export class TransactionService {
           } else if (!processedTxHashes.has(txHashLower)) {
             // Add as a new transaction only if we haven't seen this hash before
             processedTxHashes.add(txHashLower);
-            
+
             transactions.push({
               id: `${tx.hash}-${tx.traceId || '0'}`,
               timestamp: parseInt(tx.timeStamp, 10),
@@ -308,30 +308,30 @@ export class TransactionService {
           }
         }
       }
-      
+
       // Also fetch ERC20 token transfers
       const tokenTxUrl = `${apiUrl}?module=account&action=tokentx&address=${safeAddressLowercase}&startblock=0&endblock=99999999&page=${Math.floor(offset/limit) + 1}&offset=${limit}&sort=desc&apikey=${apiKey}`;
-      
+
       const tokenTxResponse = await fetch(tokenTxUrl);
       const tokenTxData = await tokenTxResponse.json();
-      
+
       this.logger.log(`Received token transaction data from Etherscan: ${JSON.stringify(tokenTxData)}`);
-      
+
       // Process token transfers if successful
       if (tokenTxData.status === '1' && Array.isArray(tokenTxData.result)) {
         for (const tx of tokenTxData.result) {
           const isOutgoing = tx.from.toLowerCase() === safeAddressLowercase;
           const isIncoming = tx.to.toLowerCase() === safeAddressLowercase;
-          
+
           // Only process state changes for the safe address
           if (!isOutgoing && !isIncoming) continue;
-          
+
           // Check if this tx hash has already been processed in regular transactions
           const txHashLower = tx.hash.toLowerCase();
-          
+
           // Check if this token tx is part of an existing transaction
           const existingTxIndex = transactions.findIndex(t => t.txHash.toLowerCase() === txHashLower);
-          
+
           if (existingTxIndex >= 0) {
             // Add this as a state change to the existing transaction
             transactions[existingTxIndex].stateChanges.push({
@@ -346,14 +346,14 @@ export class TransactionService {
           } else if (!processedTxHashes.has(txHashLower)) {
             // Add as a new transaction only if we haven't seen this hash before
             processedTxHashes.add(txHashLower);
-            
+
             transactions.push({
               id: `${tx.hash}-token-${tx.contractAddress}`,
               timestamp: parseInt(tx.timeStamp, 10),
               txHash: tx.hash,
               executedTxHash: tx.hash,
               value: '0', // Native token value is 0 for token transfers
-              nonce: 0, 
+              nonce: 0,
               to: tx.to,
               from: tx.from,
               data: '0x',
@@ -368,7 +368,7 @@ export class TransactionService {
                   value: tx.contractAddress
                 }, {
                   name: 'tokenSymbol',
-                  type: 'string', 
+                  type: 'string',
                   value: tx.tokenSymbol || await this.getTokenSymbol(tx.contractAddress, chainId)
                 }, {
                   name: 'tokenValue',
@@ -399,7 +399,7 @@ export class TransactionService {
       // Final deduplication by txHash to ensure no duplicates
       const uniqueTransactions: SafeTransaction[] = [];
       const txMap = new Map<string, SafeTransaction>();
-      
+
       for (const tx of transactions) {
         const txHashLower = tx.txHash.toLowerCase();
         if (!txMap.has(txHashLower)) {
@@ -407,16 +407,16 @@ export class TransactionService {
           uniqueTransactions.push(tx);
         }
       }
-      
+
       // Sort by timestamp (newest first)
       uniqueTransactions.sort((a, b) => b.timestamp - a.timestamp);
-      
+
       // Apply pagination
       const paginatedTransactions = uniqueTransactions.slice(
-        offset - Math.floor(offset/limit) * limit, 
+        offset - Math.floor(offset/limit) * limit,
         offset - Math.floor(offset/limit) * limit + limit
       );
-      
+
       this.logger.log(`Returning ${paginatedTransactions.length} blockchain transactions for ${safeAddressLowercase}`);
       return paginatedTransactions;
     } catch (error) {
@@ -424,7 +424,7 @@ export class TransactionService {
       return [];
     }
   }
-  
+
   /**
    * Get the native token symbol for a given chain ID
    */
@@ -441,7 +441,7 @@ export class TransactionService {
     };
     return symbolMap[chainId] || 'ETH';
   }
-  
+
   /**
    * Call the token contract to get the token symbol
    */
@@ -458,15 +458,15 @@ export class TransactionService {
         8453: 'https://base.llamarpc.com',
         100: 'https://gnosis.publicnode.com',
       };
-      
+
       const rpcUrl = rpcUrls[chainId];
       if (!rpcUrl) {
         return 'UNKNOWN';
       }
-      
+
       // ERC20 symbol() function signature
       const symbolData = '0x95d89b41'; // bytes4(keccak256('symbol()'))
-      
+
       const response = await fetch(rpcUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -483,14 +483,14 @@ export class TransactionService {
           ]
         })
       });
-      
+
       const result = await response.json();
-      
+
       if (result.error) {
         this.logger.error(`Error calling token symbol: ${result.error.message}`);
         return 'UNKNOWN';
       }
-      
+
       if (result.result && result.result.length >= 66) {
         // Parse ABI-encoded string response
         try {
@@ -507,7 +507,7 @@ export class TransactionService {
           return 'UNKNOWN';
         }
       }
-      
+
       return 'UNKNOWN';
     } catch (error) {
       this.logger.error(`Error getting token symbol: ${error.message}`);
@@ -533,4 +533,4 @@ export class TransactionService {
     this.logger.log(`getSafeTransactions called for ${safeAddress} - redirecting to blockchain transactions`);
     return this.getBlockchainTransactions(safeAddress, chainId, first, skip);
   }
-} 
+}

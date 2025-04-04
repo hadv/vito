@@ -35,13 +35,13 @@ export class TransactionService {
 
       const url = `${this.apiUrl}/transactions/blockchain?${queryParams}`;
       console.log(`Fetching blockchain transactions for Safe ${safeAddress} from: ${url}`);
-      
+
       const response = await fetch(url);
-      
+
       if (!response.ok) {
         throw new Error(`HTTP error! Status: ${response.status}`);
       }
-      
+
       const data = await response.json();
       console.log(`Received ${data.transactions?.length || 0} blockchain transactions from API`);
       return data.transactions;
@@ -50,4 +50,4 @@ export class TransactionService {
       throw error;
     }
   }
-} 
+}

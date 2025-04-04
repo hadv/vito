@@ -5,10 +5,8 @@ import { SafeInfo, NetworkConfig, Token, BlockchainTransaction } from '@/types';
 import { truncateAddress, resolveEnsName, prepareTransactionRequest, calculateSafeTxHash, formatSafeSignatures, getSafeNonce, getSafeTxHashFromContract } from '@/utils';
 import { NETWORKS, DEFAULT_NETWORK, getNetworkConfig, getContractAddress, getExplorerUrl } from '@/config';
 import { SafeTxPool } from '@/managers/transactions';
-import { PriceOracle } from '@/services/oracle';
-import { TransactionService } from '@/services/transaction';
+import { PriceOracle, TransactionService, WalletConnectService } from '@/services';
 import { HelpGuide, TransactionHistory, WalletConnectUI } from '@/components';
-import { WalletConnectService } from '@/services/wallet-connect';
 
 class VimApp {
   private buffer: HTMLDivElement;
@@ -70,7 +68,7 @@ class VimApp {
       this.mainContent,
       this.buffer
     );
-    
+
     // Check if command input exists
     if (!this.commandInput) {
       console.error('Command input element not found');
@@ -80,12 +78,12 @@ class VimApp {
     // Initialize network selection with default
     this.selectedNetwork = getNetworkConfig(DEFAULT_NETWORK);
     this.provider = new ethers.JsonRpcProvider(this.selectedNetwork.provider);
-    
+
     // Set default network in select if available
     if (this.networkSelect) {
       this.networkSelect.value = DEFAULT_NETWORK;
     }
-    
+
     console.log('VITE_API_URL:', import.meta.env.VITE_API_URL);
 
     const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
@@ -99,7 +97,7 @@ class VimApp {
     this.showInitialInputContainer();
     this.showHelpGuide();
     this.updateTitle();
-    
+
     // Initialize socket listeners
     this.initSocketListeners();
     this.updateStatus();
@@ -117,7 +115,7 @@ class VimApp {
     this.inputContainer = document.getElementById('input-container') as HTMLDivElement;
     this.safeAddressInput = document.getElementById('safe-address-input') as HTMLInputElement;
     this.networkSelect = document.getElementById('network-select') as HTMLSelectElement;
-    
+
     // Add paste event handler and click-to-edit functionality for Safe address input
     if (this.safeAddressInput) {
       // Handle paste event
@@ -157,7 +155,7 @@ class VimApp {
     }
 
     // Removed duplicate initialization: this.walletConnectService = new WalletConnectService();
-    
+
     // Add WalletConnect event listeners
     this.setupWalletConnectServiceListeners();
   }
@@ -166,7 +164,7 @@ class VimApp {
     // Simple keydown handler for command input
     this.commandInput.addEventListener('keydown', async (e: KeyboardEvent) => {
       console.log('Keydown event:', e.key); // Add logging
-      
+
       if (e.key === ':') {
         e.preventDefault();
         this.command = ':';
@@ -233,14 +231,14 @@ class VimApp {
             <div class="absolute inset-y-0 left-0 flex items-center pl-3.5 pointer-events-none">
               <div class="w-6 h-6 bg-gray-600 rounded-full"></div>
             </div>
-            <input 
-              type="text" 
-              id="safe-address-input" 
-              class="block pl-14 pr-2.5 py-4 w-full text-white bg-[#2c2c2c] rounded-lg border border-gray-700 appearance-none focus:outline-none focus:ring-0 focus:border-blue-600 peer cursor-pointer" 
+            <input
+              type="text"
+              id="safe-address-input"
+              class="block pl-14 pr-2.5 py-4 w-full text-white bg-[#2c2c2c] rounded-lg border border-gray-700 appearance-none focus:outline-none focus:ring-0 focus:border-blue-600 peer cursor-pointer"
               placeholder=" "
             />
-            <label 
-              for="safe-address-input" 
+            <label
+              for="safe-address-input"
               class="absolute text-sm text-gray-400 duration-300 transform -translate-y-6 scale-75 top-2 z-10 origin-[0] bg-[#2c2c2c] px-2 peer-focus:px-2 peer-focus:text-blue-600 left-1"
             >
               Safe Account
@@ -248,7 +246,7 @@ class VimApp {
           </div>
           <div class="flex-shrink-0 relative mt-4 sm:mt-0">
             <select id="network-select" class="block w-full sm:w-48 h-[58px] px-3 text-white bg-[#2c2c2c] border border-gray-700 rounded-lg focus:outline-none focus:ring-0 focus:border-blue-600 appearance-none cursor-pointer">
-              ${Object.entries(NETWORKS).map(([key, network]) => 
+              ${Object.entries(NETWORKS).map(([key, network]) =>
                 `<option value="${key}" ${key === DEFAULT_NETWORK ? 'selected' : ''}>${network.displayName}</option>`
               ).join('')}
             </select>
@@ -327,7 +325,7 @@ class VimApp {
       console.log('Safe connection already in progress, ignoring duplicate request');
       return;
     }
-    
+
     try {
       this.isConnecting = true;
       this.buffer.innerHTML = '';
@@ -368,8 +366,8 @@ class VimApp {
       // Update the Safe address display with ENS name if available
       if (this.safeAddressDisplay) {
       const ensName = await resolveEnsName(safeAddress, this.provider);
-        this.safeAddressDisplay.textContent = ensName 
-          ? `${ensName} (${truncateAddress(safeAddress)})` 
+        this.safeAddressDisplay.textContent = ensName
+          ? `${ensName} (${truncateAddress(safeAddress)})`
           : truncateAddress(safeAddress);
       }
 
@@ -395,7 +393,7 @@ class VimApp {
         this.safeAddressInput = null;
         this.networkSelect = null;
       }
-        
+
         // Clear the buffer and show success message
         this.buffer.innerHTML = '';
       const successMsg = document.createElement('p');
@@ -410,28 +408,28 @@ class VimApp {
 
     } catch (error: unknown) {
       console.error('Failed to connect to Safe:', error);
-      
+
       // Show error message
       this.buffer.innerHTML = '';
       const errorMsg = document.createElement('p');
       errorMsg.textContent = `Error: ${error instanceof Error ? error.message : 'Unknown error'}`;
       errorMsg.className = 'text-red-500';
       this.buffer.appendChild(errorMsg);
-      
+
       // Reset Safe address and cached info
       this.safeAddress = null;
       this.clearSafeInfoCache();
-      
+
       // Make sure input container is still available
       if (!this.inputContainer) {
         this.showInitialInputContainer();
       }
-      
+
       // Ensure command input is focused
       setTimeout(() => {
         this.commandInput.focus();
       }, 100);
-      
+
       throw error;
     } finally {
       this.isConnecting = false;
@@ -446,40 +444,40 @@ class VimApp {
         this.updateSignerDisplay();
       }
     });
-    
+
     // Handle session deletion or expiry
     this.walletConnectService.addEventListener('session_delete', () => {
       this.handleWalletDisconnect();
     });
-    
+
     this.walletConnectService.addEventListener('session_expire', () => {
       this.handleWalletDisconnect();
     });
-    
+
     // Handle dApp connection
     this.walletConnectService.addEventListener('dapp_connected', (data: any) => {
       if (data.metadata) {
         this.updateDAppConnectionIndicator(data.metadata);
       }
     });
-    
+
     // Handle dApp disconnection
     this.walletConnectService.addEventListener('dapp_disconnected', () => {
       this.hideDAppConnectionIndicator();
     });
   }
-  
+
   private async updateSignerDisplay(): Promise<void> {
     if (this.signerAddress) {
       const ensName = await resolveEnsName(this.signerAddress, this.provider);
-      this.signerAddressDisplay.textContent = ensName 
-        ? `${ensName} (${truncateAddress(this.signerAddress)})` 
+      this.signerAddressDisplay.textContent = ensName
+        ? `${ensName} (${truncateAddress(this.signerAddress)})`
         : truncateAddress(this.signerAddress);
     } else {
       this.signerAddressDisplay.textContent = '';
     }
   }
-  
+
   private handleWalletDisconnect(): void {
     // Clear the WalletConnect session state
     this.sessionTopic = null;
@@ -491,12 +489,12 @@ class VimApp {
     try {
       // Use the WalletConnect service to disconnect
       await this.walletConnectService.disconnect();
-      
+
       // Clear UI state
       this.sessionTopic = null;
       this.signerAddress = null;
       this.signerAddressDisplay.textContent = '';
-      
+
       // Show success message
       this.buffer.innerHTML = '';
       const successMsg = document.createElement('p');
@@ -505,7 +503,7 @@ class VimApp {
       this.buffer.appendChild(successMsg);
     } catch (error: any) {
       console.error('WalletConnect disconnection failed:', error);
-      
+
       // Show error message
       this.buffer.innerHTML = '';
       const errorMsg = document.createElement('p');
@@ -568,7 +566,7 @@ class VimApp {
 
   private async handleNormalMode(e: KeyboardEvent): Promise<void> {
     console.log('Handling normal mode key:', e.key, 'Current command:', this.command);
-    
+
     if (e.key === ':') {
       this.command = ':';
       console.log('Started command mode');
@@ -577,8 +575,8 @@ class VimApp {
       if (this.signerAddress && this.safeAddress) {
         // Clear buffer before checking ownership
         this.buffer.innerHTML = '';
-        
-        
+
+
         // Check if the signer is an owner
         if (this.cachedSafeInfo && this.cachedSafeInfo.owners.includes(this.signerAddress)) {
           // Signer is an owner, switch to TX mode
@@ -669,15 +667,15 @@ class VimApp {
 
       try {
         const contractAddresses = getContractAddress(this.selectedNetwork);
-        
+
         // Create interface for the deleteTx function
         const iface = new ethers.Interface([
           "function deleteTx(bytes32 txHash) external"
         ]);
-        
+
         // Encode the function call data
         const encodedTxData = iface.encodeFunctionData("deleteTx", [this.selectedTxHash]);
-        
+
         // Prepare the transaction request
         const request = await prepareTransactionRequest({
           provider: this.provider,
@@ -691,7 +689,7 @@ class VimApp {
 
         // Update UI to show progress
         this.buffer.textContent = 'Preparing to delete transaction...';
-        
+
         // Add transaction summary to the UI before sending
         const txSummary = document.createElement('div');
         txSummary.className = 'max-w-2xl mx-auto mt-4 bg-red-900/50 p-6 rounded-lg border border-red-700 shadow-lg';
@@ -721,23 +719,23 @@ class VimApp {
         try {
           // Send the request and wait for response
           txHash = await this.signClient.request(request);
-          
+
           if (!txHash || typeof txHash !== 'string') {
             throw new Error('Invalid transaction hash received');
           }
-          
+
           // Show pending transaction message
           const pendingMsg = document.createElement('div');
           pendingMsg.className = 'text-blue-300 mt-4';
           pendingMsg.textContent = `Transaction submitted! Waiting for confirmation...`;
           this.buffer.appendChild(pendingMsg);
-          
+
           // Wait for transaction to be mined
           await this.provider.waitForTransaction(txHash);
-          
+
           // Clear selection and refresh the transaction list
           this.selectedTxHash = null;
-          
+
           // Show success message
           const successMsg = document.createElement('div');
           successMsg.className = 'text-green-400 mt-4 p-4 bg-green-900/30 rounded-lg border border-green-800';
@@ -751,7 +749,7 @@ class VimApp {
             <p class="mt-2 text-sm">Transaction hash: ${truncateAddress(txHash)}</p>
           `;
           this.buffer.appendChild(successMsg);
-          
+
           // Add a button to refresh the transaction list
           const refreshButton = document.createElement('button');
           refreshButton.className = 'mt-4 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors';
@@ -761,14 +759,14 @@ class VimApp {
             await this.executeCommand();
           };
           this.buffer.appendChild(refreshButton);
-          
+
         } catch (error: any) {
           console.error('Transaction request failed:', error);
-          
+
           // Show error message
           const errorMsg = document.createElement('div');
           errorMsg.className = 'text-red-400 mt-4 p-4 bg-red-900/30 rounded-lg border border-red-800';
-          
+
           if (error.code === 4001) {
             // User rejected the transaction
             errorMsg.innerHTML = `
@@ -801,7 +799,7 @@ class VimApp {
               <p class="mt-2 text-sm">Error: ${error.message || 'Unknown error'}</p>
             `;
           }
-          
+
           this.buffer.appendChild(errorMsg);
         }
       } catch (error: any) {
@@ -811,7 +809,7 @@ class VimApp {
       }
       return;
     }
-    
+
     if (this.command === ':c') {
       if (!this.safeAddressInput) {
         this.buffer.textContent = 'Please enter a Safe address in the input field';
@@ -836,13 +834,13 @@ class VimApp {
       try {
         // Clear any existing Safe info cache
         this.clearSafeInfoCache();
-        
+
         // Update the provider to use the selected network
         this.provider = new ethers.JsonRpcProvider(this.selectedNetwork.provider);
-        
+
         // Connect to the Safe with the current network
         await this.connectWallet(safeAddress);
-        
+
         // Remove the input container
       if (this.inputContainer) {
         this.inputContainer.remove();
@@ -850,7 +848,7 @@ class VimApp {
         this.safeAddressInput = null;
           this.networkSelect = null;
         }
-        
+
         // Clear the buffer
         this.buffer.innerHTML = '';
       } catch (error) {
@@ -896,41 +894,41 @@ class VimApp {
       this.cachedSafeInfo = null;
       this.txFormData = null;
       this.mode = 'READ ONLY';
-      
+
       // Reset network to current selection
       if (this.networkSelect) {
         this.selectedNetwork = getNetworkConfig(this.networkSelect.value);
         this.provider = new ethers.JsonRpcProvider(this.selectedNetwork.provider);
       }
-      
+
       // Clear displays
       this.safeAddressDisplay.textContent = '';
       this.signerAddressDisplay.textContent = '';
-      
+
       // Hide the header network select
       const headerNetworkContainer = document.getElementById('header-network-container');
       if (headerNetworkContainer) {
         headerNetworkContainer.classList.add('hidden');
       }
-      
+
       // Remove existing input container if it exists
       const existingContainer = document.getElementById('input-container');
       if (existingContainer) {
         existingContainer.remove();
       }
-      
+
       // Show initial input container with fresh event listeners
       this.showInitialInputContainer();
-      
+
       // Show help guide
       this.showHelpGuide();
-      
+
       // Update status
       this.updateStatus();
-      
+
       // Clear buffer
       this.buffer.innerHTML = '';
-      
+
       // Focus command input
       setTimeout(() => {
         this.commandInput.focus();
@@ -967,10 +965,10 @@ class VimApp {
         // Get contract address for the current network
         const contractAddresses = getContractAddress(this.selectedNetwork);
         const safeTxPool = new SafeTxPool(contractAddresses.safeTxPool, this.selectedNetwork);
-        
+
         // Get pending transactions
         const pendingTxHashes = await safeTxPool.getPendingTransactions(this.safeAddress);
-        
+
         if (pendingTxHashes.length === 0) {
           this.buffer.innerHTML = `
             <div class="max-w-4xl mx-auto bg-gray-800 p-6 rounded-lg border border-gray-700 shadow-lg">
@@ -984,7 +982,7 @@ class VimApp {
         const container = document.createElement('div');
         container.className = 'max-w-4xl mx-auto';
         container.setAttribute('tabindex', '0'); // Make container focusable
-        
+
         // Create table
         const table = document.createElement('div');
         table.className = 'min-w-full bg-gray-800 rounded-lg border border-gray-700 shadow-lg overflow-hidden';
@@ -1015,7 +1013,7 @@ class VimApp {
           const txDetails = await safeTxPool.getTransactionDetails(txHash);
           txDetailsMap.set(txHash, txDetails);
           const valueInEth = ethers.formatEther(txDetails.value);
-          
+
           const row = document.createElement('div');
           row.className = 'px-4 py-3 border-b border-gray-700 hover:bg-gray-700/50 cursor-pointer';
           row.setAttribute('data-tx-hash', txHash);
@@ -1030,7 +1028,7 @@ class VimApp {
               <div class="col-span-1 text-gray-300">${txDetails.signatures.length}</div>
             </div>
           `;
-          
+
           // Add click handler for selection
           row.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -1044,13 +1042,13 @@ class VimApp {
             row.classList.add('bg-gray-700', 'selected-tx');
             // Store the selected transaction hash
             self.selectedTxHash = row.getAttribute('data-tx-hash') || null;
-            
+
             // Show transaction details
             const txHash = row.getAttribute('data-tx-hash');
             if (txHash) {
               showTxDetails(txHash);
             }
-            
+
             // Focus the command input for immediate command entry
             if (self.commandInput) {
               self.commandInput.focus();
@@ -1061,7 +1059,7 @@ class VimApp {
         }
 
         container.appendChild(table);
-        
+
         // Add help text
         const helpText = document.createElement('p');
         helpText.className = 'text-center text-gray-400 text-xs mt-4';
@@ -1085,7 +1083,7 @@ class VimApp {
             } else {
               // Remove all styling from non-focused rows
               row.classList.remove('bg-gray-700', 'selected-tx', 'border-l-4', 'border-l-yellow-500');
-              
+
               // Reset any modified padding
               const content = row.querySelector('.grid');
               if (content) {
@@ -1099,7 +1097,7 @@ class VimApp {
         // Add keyboard navigation
         container.addEventListener('keydown', (e: KeyboardEvent) => {
           const totalTx = pendingTxHashes.length;
-          
+
           switch (e.key) {
             case 'ArrowUp':
               e.preventDefault();
@@ -1107,14 +1105,14 @@ class VimApp {
                 updateFocus(currentFocusIndex - 1);
               }
               break;
-              
+
             case 'ArrowDown':
               e.preventDefault();
               if (currentFocusIndex < totalTx - 1) {
                 updateFocus(currentFocusIndex + 1);
               }
               break;
-              
+
             case 'Enter':
               e.preventDefault();
               const selectedTxHash = pendingTxHashes[currentFocusIndex];
@@ -1128,12 +1126,12 @@ class VimApp {
                   });
                   selectedRow.classList.add('bg-gray-700', 'selected-tx');
                 }
-                
+
                 // Toggle transaction details (don't move focus)
                 showTxDetails(selectedTxHash);
               }
               break;
-              
+
             case ':':
               e.preventDefault();
               // Focus the command input when colon is pressed
@@ -1145,7 +1143,7 @@ class VimApp {
                 self.commandInput.setSelectionRange(1, 1);
               }
               break;
-              
+
             case 'Escape':
               e.preventDefault();
               const existingDetails = document.querySelector('.tx-details');
@@ -1163,27 +1161,27 @@ class VimApp {
                   // Ensure the row stays selected with more prominent styling
                   document.querySelectorAll('#tx-table > div:not(:first-child)').forEach(row => {
                     row.classList.remove('bg-gray-700', 'selected-tx', 'border-l-4', 'border-l-yellow-500', 'pl-3');
-                    
+
                     // Reset any modified padding from previous selections
                     const content = row.querySelector('.grid');
                     if (content) {
                       content.classList.remove('ml-2');
                     }
                   });
-                  
+
                   // Add more distinctive styling to the selected row
                   selectedRow.classList.add('bg-gray-700', 'selected-tx', 'border-l-4', 'border-l-yellow-500');
-                  
+
                   // Adjust padding for the content to account for the border
                   const content = selectedRow.querySelector('.grid');
                   if (content) {
                     content.classList.add('ml-2');
                   }
                 }
-                
+
                 // Store the selected transaction hash
                 self.selectedTxHash = txHashToSelect;
-                
+
                 // Focus the command input for immediate command entry
                 if (self.commandInput) {
                   self.commandInput.focus();
@@ -1207,7 +1205,7 @@ class VimApp {
             self.commandInput.value = '';
             // Return focus to the container
             container.focus();
-            
+
             // If there's a selected transaction, maintain its focus and enhance its styling
             if (self.selectedTxHash) {
               const index = pendingTxHashes.findIndex(hash => hash === self.selectedTxHash);
@@ -1218,24 +1216,24 @@ class VimApp {
                   // Clear previous styling from all rows
                   document.querySelectorAll('#tx-table > div:not(:first-child)').forEach(row => {
                     row.classList.remove('bg-gray-700', 'selected-tx', 'border-l-4', 'border-l-yellow-500', 'pl-3');
-                    
+
                     // Reset any modified padding from previous selections
                     const content = row.querySelector('.grid');
                     if (content) {
                       content.classList.remove('ml-2');
                     }
                   });
-                  
+
                   // Add distinctive styling to the selected row
                   selectedRow.classList.add('bg-gray-700', 'selected-tx', 'border-l-4', 'border-l-yellow-500');
-                  
+
                   // Adjust padding for the content to account for the border
                   const content = selectedRow.querySelector('.grid');
                   if (content) {
                     content.classList.add('ml-2');
                   }
                 }
-                
+
                 updateFocus(index);
               }
             }
@@ -1247,13 +1245,13 @@ class VimApp {
           // Check if details for this transaction are already open
           const existingDetails = document.querySelector('.tx-details');
           const clickedRow = document.querySelector(`[data-tx-hash="${txHash}"]`);
-          
+
           // If details exist and belong to the clicked row, close them (toggle off)
           if (existingDetails && clickedRow && existingDetails.previousElementSibling === clickedRow) {
             existingDetails.remove();
             return;
           }
-          
+
           // Remove any existing details row
           if (existingDetails) {
             existingDetails.remove();
@@ -1261,14 +1259,14 @@ class VimApp {
 
           const txDetails = txDetailsMap.get(txHash);
           const row = document.querySelector(`[data-tx-hash="${txHash}"]`);
-          
+
           if (row && txDetails) {
             // Ensure the row stays selected when showing details
             document.querySelectorAll('#tx-table > div:not(:first-child)').forEach(r => {
               r.classList.remove('bg-gray-700', 'selected-tx');
             });
             row.classList.add('bg-gray-700', 'selected-tx');
-            
+
             const detailsRow = document.createElement('div');
             detailsRow.className = 'px-4 py-3 bg-gray-900/50 tx-details';
             detailsRow.innerHTML = `
@@ -1292,14 +1290,14 @@ class VimApp {
                 <div>
                   <span class="text-gray-400">Signatures:</span>
                   <div class="pl-4 space-y-1">
-                    ${txDetails.signatures.map((sig: string) => 
+                    ${txDetails.signatures.map((sig: string) =>
                       `<span class="text-gray-300 font-mono break-all">${sig}</span>`
                     ).join('<br>')}
                   </div>
                 </div>
               </div>
             `;
-            
+
             row.parentNode?.insertBefore(detailsRow, row.nextElementSibling);
           }
         };
@@ -1346,7 +1344,7 @@ class VimApp {
         console.log('Connection already in progress, ignoring :s command');
         return;
       }
-      
+
       if (this.mode !== 'TX') {
         this.buffer.textContent = 'Please switch to TX mode first by pressing "e" key';
         this.buffer.className = 'flex-1 p-4 overflow-y-auto text-yellow-400';
@@ -1373,13 +1371,13 @@ class VimApp {
       try {
         // Set connecting flag to prevent duplicate requests
         this.isConnecting = true;
-        
+
         // Get contract address for the current network
         const contractAddresses = getContractAddress(this.selectedNetwork);
-        
+
         // First convert the hash to proper hex if it isn't already
         const hashHex = this.selectedTxHash.startsWith('0x') ? this.selectedTxHash : `0x${this.selectedTxHash}`;
-        
+
         // Then ensure it's padded to 32 bytes
         const formattedHash = ethers.zeroPadValue(hashHex, 32);
 
@@ -1425,7 +1423,7 @@ class VimApp {
 
         // Convert value to hex if needed
         const valueHex = localTxData.value.startsWith('0x') ? localTxData.value : `0x${BigInt(localTxData.value).toString(16)}`;
-        
+
         // Ensure data is hex
         const dataHex = localTxData.data.startsWith('0x') ? localTxData.data : `0x${localTxData.data}`;
 
@@ -1639,10 +1637,10 @@ class VimApp {
 
       } catch (error: unknown) {
         console.error('Failed to sign transaction:', error);
-        
+
         // Handle user rejection
-        if (error instanceof Error && 
-            (error.message.toLowerCase().includes('rejected') || 
+        if (error instanceof Error &&
+            (error.message.toLowerCase().includes('rejected') ||
              error.message.toLowerCase().includes('user denied'))) {
           this.buffer.innerHTML = '';
           const rejectionMsg = document.createElement('div');
@@ -1659,16 +1657,16 @@ class VimApp {
           this.buffer.appendChild(rejectionMsg);
           return;
         }
-        
+
         // Handle session errors
-        if (error instanceof Error && 
-            (error.message.includes('session topic') || 
+        if (error instanceof Error &&
+            (error.message.includes('session topic') ||
              error.message.includes('No matching key') ||
              error.message.includes('expired'))) {
           this.sessionTopic = null;
           this.signerAddress = null;
           this.signerAddressDisplay.textContent = '';
-          
+
           this.buffer.innerHTML = '';
           const reconnectMsg = document.createElement('div');
           reconnectMsg.className = 'max-w-2xl mx-auto bg-yellow-900/50 p-6 rounded-lg border border-yellow-700 shadow-lg';
@@ -1691,7 +1689,7 @@ class VimApp {
           this.buffer.appendChild(reconnectMsg);
           return;
         }
-        
+
         // Handle other errors
         this.buffer.innerHTML = '';
         const errorMsg = document.createElement('div');
@@ -1736,7 +1734,7 @@ class VimApp {
         console.log('Connection already in progress, ignoring :e command');
         return;
       }
-      
+
       if (!this.selectedTxHash) {
         this.buffer.textContent = 'Please select a transaction to execute';
         this.buffer.className = 'flex-1 p-4 overflow-y-auto text-yellow-400';
@@ -1767,7 +1765,7 @@ class VimApp {
         this.buffer.appendChild(errorMsg);
         return;
       }
-      
+
       await this.showTransactionHistoryScreen();
     } else if (this.command === ':dd') {
       await this.disconnectFromDApp();
@@ -1850,20 +1848,20 @@ class VimApp {
         // Create custom dropdown container
         const dropdownContainer = document.createElement('div');
         dropdownContainer.className = 'absolute z-10 mt-1 w-full overflow-auto rounded-md bg-gray-800 py-1 text-base shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none sm:text-sm hidden';
-        
+
         // Add owner options if available
         if (this.cachedSafeInfo && this.cachedSafeInfo.owners.length > 0) {
           this.cachedSafeInfo.owners.forEach(owner => {
             const option = document.createElement('div');
             option.className = 'relative cursor-pointer select-none py-2 pl-3 pr-9 text-gray-300 hover:bg-gray-700 hover:text-white text-left';
             option.textContent = owner;
-            
+
             option.addEventListener('click', () => {
               input.value = owner;
               this.txFormData!.to = owner;
               dropdownContainer.classList.add('hidden');
             });
-            
+
             dropdownContainer.appendChild(option);
           });
         }
@@ -1900,7 +1898,7 @@ class VimApp {
             e.preventDefault();
             const options = dropdownContainer.children;
             const currentIndex = Array.from(options).findIndex(opt => opt.classList.contains('bg-gray-700'));
-            
+
             if (keyEvent.key === 'ArrowDown') {
               const nextIndex = currentIndex < options.length - 1 ? currentIndex + 1 : 0;
               options[currentIndex]?.classList.remove('bg-gray-700');
@@ -1992,15 +1990,15 @@ class VimApp {
 
   private async proposeToSafeTxPool(): Promise<void> {
     console.log('Proposing transaction to SafeTxPool');
-    
+
     if (!this.txFormData) {
       console.error('No transaction data to propose');
       return;
     }
-    
+
     // Log the txFormData being proposed
     console.log('Proposing transaction with data:', JSON.stringify(this.txFormData));
-    
+
     // Check if the data field is non-empty for ERC20 transfers
     if (this.txFormData.data && this.txFormData.data.startsWith('0xa9059cbb')) {
       console.log('This appears to be an ERC20 transfer. Decoded data:');
@@ -2018,15 +2016,15 @@ class VimApp {
         console.error('Error decoding ERC20 transfer data:', error);
       }
     }
-    
-    // Check both proposing and connecting flags 
+
+    // Check both proposing and connecting flags
     if (this._isProposing || this.isConnecting || !this.txFormData) {
       if (this.isConnecting) {
         console.log('Connection already in progress, ignoring transaction proposal');
       }
       return;
     }
-    
+
     this._isProposing = true;
     this.isConnecting = true; // Also set isConnecting to true
 
@@ -2082,12 +2080,12 @@ class VimApp {
       // Get contract address and prepare basic data
       const contractAddresses = getContractAddress(this.selectedNetwork);
       const nonce = await getSafeNonce(this.safeAddress, this.provider);
-      
+
       // Convert value to hex
-      const valueHex = localTxData.value.startsWith('0x') ? 
-        localTxData.value : 
+      const valueHex = localTxData.value.startsWith('0x') ?
+        localTxData.value :
         `0x${ethers.parseEther(localTxData.value).toString(16)}`;
-      
+
       // Ensure data is hex
       const dataHex = localTxData.data.startsWith('0x') ? localTxData.data : `0x${localTxData.data}`;
 
@@ -2150,7 +2148,7 @@ class VimApp {
             <h4 class="text-sm font-medium text-gray-400 mb-2">Function Call</h4>
             <p class="font-mono text-sm text-blue-400">${functionName}</p>
           </div>
-          
+
           <div class="bg-gray-900 p-4 rounded-lg">
             <h4 class="text-sm font-medium text-gray-400 mb-2">Arguments</h4>
             <div class="space-y-2 font-mono text-sm">
@@ -2192,8 +2190,8 @@ class VimApp {
                 ${hashVerification ? '✓ Verified' : '✗ Invalid'}
               </span>
               <span class="text-gray-400 text-sm">
-                ${hashVerification ? 
-                  'Safe transaction hash matches the calculated hash' : 
+                ${hashVerification ?
+                  'Safe transaction hash matches the calculated hash' :
                   'Warning: Safe transaction hash does not match the calculated hash'}
               </span>
             </div>
@@ -2289,17 +2287,17 @@ class VimApp {
       try {
         // Send the request and wait for response
         txHash = await this.signClient.request(request);
-        
+
         if (!txHash || typeof txHash !== 'string') {
           throw new Error('Invalid transaction hash received');
         }
       } catch (error: any) {
         console.error('Transaction request failed:', error);
-        
+
         // Handle user rejection
-        if (error?.message?.toLowerCase().includes('rejected') || 
+        if (error?.message?.toLowerCase().includes('rejected') ||
             error?.message?.toLowerCase().includes('user denied')) {
-          
+
           // Show user-friendly rejection message
           this.buffer.innerHTML = '';
           const rejectionMsg = document.createElement('div');
@@ -2324,15 +2322,15 @@ class VimApp {
           this.buffer.appendChild(rejectionMsg);
           return;
         }
-        
+
         // Handle session errors
-        if (error?.message?.includes('session topic') || 
+        if (error?.message?.includes('session topic') ||
             error?.message?.includes('No matching key') ||
             error?.message?.includes('expired')) {
           this.sessionTopic = null;
           this.signerAddress = null;
           this.signerAddressDisplay.textContent = '';
-          
+
           this.buffer.innerHTML = '';
           const reconnectMsg = document.createElement('div');
           reconnectMsg.className = 'max-w-2xl mx-auto bg-yellow-900/50 p-6 rounded-lg border border-yellow-700 shadow-lg';
@@ -2355,7 +2353,7 @@ class VimApp {
           this.buffer.appendChild(reconnectMsg);
           return;
         }
-        
+
         // Handle other errors with improved UI
       this.buffer.innerHTML = '';
         const errorMsg = document.createElement('div');
@@ -2400,16 +2398,16 @@ class VimApp {
 
     } catch (error: unknown) {
       console.error('Failed to propose transaction to SafeTxPool:', error);
-      
+
       // Handle session errors
-      if (error instanceof Error && 
-          (error.message.includes('session topic') || 
+      if (error instanceof Error &&
+          (error.message.includes('session topic') ||
            error.message.includes('No matching key') ||
            error.message.includes('expired'))) {
         this.sessionTopic = null;
         this.signerAddress = null;
         this.signerAddressDisplay.textContent = '';
-        
+
         this.buffer.innerHTML = '';
         const reconnectMsg = document.createElement('p');
         reconnectMsg.textContent = 'WalletConnect session expired. Please reconnect using :wc command.';
@@ -2417,7 +2415,7 @@ class VimApp {
         this.buffer.appendChild(reconnectMsg);
         return;
       }
-      
+
       this.buffer.innerHTML = '';
       const errorMsg = document.createElement('p');
       errorMsg.textContent = `Error: ${error instanceof Error ? error.message : 'Unknown error'}`;
@@ -2486,42 +2484,42 @@ class VimApp {
     title.className = 'text-xl font-bold text-white mb-4';
     title.textContent = 'Safe Information';
     container.appendChild(title);
-    
+
     // Create tabs
     const tabsContainer = document.createElement('div');
     tabsContainer.className = 'border-b border-gray-700 mb-4';
     const tabsList = document.createElement('div');
     tabsList.className = 'flex';
-    
+
     // Create tabs
     const tabs = [
       { id: 'info', label: 'Info' },
       { id: 'assets', label: 'Assets' }
     ];
-    
+
     const tabBodies: {[key: string]: HTMLDivElement} = {};
     const tabButtons: HTMLButtonElement[] = [];
-    
+
     // Function to switch tabs
     const switchToTab = (tabIndex: number) => {
       // Ensure index is within bounds
       const index = Math.max(0, Math.min(tabIndex, tabs.length - 1));
-      
+
       // Remove active class from all tabs
       tabButtons.forEach(btn => {
         btn.className = 'py-2 px-4 font-medium text-gray-400 hover:text-blue-300';
       });
-      
+
       // Hide all tab contents
       Object.values(tabBodies).forEach(content => {
         content.style.display = 'none';
       });
-      
+
       // Set active tab
       tabButtons[index].className = 'py-2 px-4 font-medium text-blue-400 border-b-2 border-blue-400';
       const tabId = tabs[index].id;
       tabBodies[tabId].style.display = 'block';
-      
+
       // If switching to the Assets tab, find and focus the token table
       if (tabId === 'assets') {
         // Use a short timeout to ensure DOM is updated before focusing
@@ -2530,7 +2528,7 @@ class VimApp {
           if (tokenTable) {
             console.log('Focusing token table from tab switch');
             tokenTable.focus();
-            
+
             // Also trigger the first row selection
             const updateFocusFunction = (window as any).currentTokenTableUpdateFocus;
             if (typeof updateFocusFunction === 'function') {
@@ -2547,7 +2545,7 @@ class VimApp {
         }, 50);
       }
     };
-    
+
     // Create tab buttons
     tabs.forEach((tab, index) => {
       const tabButton = document.createElement('button');
@@ -2555,34 +2553,34 @@ class VimApp {
       tabButton.textContent = tab.label;
       tabButton.dataset.tab = tab.id;
       tabButton.dataset.index = index.toString();
-      
+
       // Store reference to button
       tabButtons.push(tabButton);
-      
+
       // Create tab content container
       const tabContent = document.createElement('div');
       tabContent.className = 'tab-content';
       tabContent.id = `${tab.id}-content`;
       tabContent.style.display = index === 0 ? 'block' : 'none';
       tabBodies[tab.id] = tabContent;
-      
+
       // Add click event
       tabButton.addEventListener('click', () => {
         switchToTab(index);
         // Focus the container after handling the click
         setTimeout(() => container.focus(), 50);
       });
-      
+
       tabsList.appendChild(tabButton);
     });
-    
+
     // Add keyboard navigation for tabs
     container.addEventListener('keydown', (e) => {
       // Get currently active tab index
-      const activeTabIndex = tabButtons.findIndex(btn => 
+      const activeTabIndex = tabButtons.findIndex(btn =>
         btn.className.includes('text-blue-400')
       );
-      
+
       if (e.key === 'ArrowRight') {
         // Switch to next tab if possible
         if (activeTabIndex < tabs.length - 1) {
@@ -2597,18 +2595,18 @@ class VimApp {
         }
       }
     });
-    
+
     tabsContainer.appendChild(tabsList);
     container.appendChild(tabsContainer);
-    
+
     // Create the Info tab content
     tabsContainer.appendChild(tabsList);
     container.appendChild(tabsContainer);
-    
+
     // Create the Info tab content
     const infoBox = document.createElement('div');
     infoBox.className = 'bg-gray-700 p-4 rounded-lg';
-    
+
     const infoList = document.createElement('ul');
     infoList.className = 'space-y-2 text-sm';
 
@@ -2650,41 +2648,41 @@ class VimApp {
 
     infoBox.appendChild(infoList);
     tabBodies['info'].appendChild(infoBox);
-    
+
     // Create the Assets tab content
     const assetsBox = document.createElement('div');
     assetsBox.className = 'bg-gray-700 p-4 rounded-lg';
-    
+
     // Show loading indicator initially
     assetsBox.innerHTML = `
       <div class="flex justify-center items-center p-4">
         <span class="text-gray-400">Loading token balances...</span>
       </div>
     `;
-    
+
     tabBodies['assets'].appendChild(assetsBox);
-    
+
     // Add tab bodies to container
     Object.values(tabBodies).forEach(content => {
       container.appendChild(content);
     });
-    
+
     this.buffer.appendChild(container);
-    
+
     // Fetch token balances
     this.fetchTokenBalances(assetsBox);
-    
-    // Focus the container immediately 
+
+    // Focus the container immediately
     setTimeout(() => {
       container.focus();
       console.log('Initial focus on Safe info container');
-      
+
       // Add subtle visual indicator for keyboard focus
       container.style.outline = '2px solid #3b82f6';
       container.style.outlineOffset = '2px';
     }, 100);
   }
-  
+
   // New method to fetch and display token balances
   private async fetchTokenBalances(container: HTMLElement): Promise<void> {
     if (!this.safeAddress || !this.provider) {
@@ -2695,14 +2693,14 @@ class VimApp {
       `;
       return;
     }
-    
+
     try {
       // Get native token (ETH) balance
       const ethBalance = await this.provider.getBalance(this.safeAddress);
-      
+
       // Clear loading and set up table
       container.innerHTML = '';
-      
+
       // Add title
       const title = document.createElement('div');
       title.className = 'mb-3 pb-2 border-b border-gray-600';
@@ -2711,26 +2709,26 @@ class VimApp {
         <p class="text-gray-400 text-xs">Safe: ${truncateAddress(this.safeAddress)}</p>
       `;
       container.appendChild(title);
-      
+
       // Create token list container with similar structure to tx table
       const tokenTable = document.createElement('div');
       tokenTable.id = 'token-table';
       tokenTable.className = 'w-full text-sm bg-gray-800 rounded-lg overflow-hidden outline-none focus:ring-2 focus:ring-blue-500';
       tokenTable.tabIndex = 0; // Make it focusable
-      
+
       // Add focus styles to make it obvious when focused
       tokenTable.addEventListener('focus', () => {
         console.log('Token table focused');
         // Add a highlighted border when focused - use the exact same style as pending tx screen
         tokenTable.classList.add('ring-2', 'ring-blue-500');
       });
-      
+
       tokenTable.addEventListener('blur', () => {
         console.log('Token table blurred');
         // Remove styles when losing focus
         tokenTable.classList.remove('ring-2', 'ring-blue-500');
       });
-      
+
       // Create header
       const header = document.createElement('div');
       header.className = 'grid grid-cols-3 text-left text-gray-400 border-b border-gray-600 bg-gray-800 p-3 font-medium';
@@ -2740,20 +2738,20 @@ class VimApp {
         <div class="text-right">Value</div>
       `;
       tokenTable.appendChild(header);
-      
+
       // Get network specific ETH name directly from the network config
       const nativeCurrencyName = this.selectedNetwork.nativeTokenName;
-      
+
       // Check if connected wallet is owner of the safe
       const isOwner = this.signerAddress && this.cachedSafeInfo?.owners.some(
         owner => owner.toLowerCase() === this.signerAddress?.toLowerCase()
       );
-      
+
       // Store token data for navigation
       const tokenData: Token[] = [];
       let currentFocusIndex = 0;
       const self = this; // Reference to VimApp instance
-      
+
       // Create ETH token object
       const ethToken: Token = {
         symbol: 'ETH',
@@ -2763,19 +2761,19 @@ class VimApp {
         address: 'ETH', // Special case for ETH
         decimals: 18
       };
-      
+
       // Get ETH price for USD value calculation
       const ethPrice = await PriceOracle.getEthPrice(this.provider);
       ethToken.valueUsd = parseFloat(ethToken.balanceFormatted) * ethPrice;
-      
+
       // Add ETH token to the data array
       tokenData.push(ethToken);
-      
+
       // Create ETH row (similar to transaction rows in pending tx screen)
       const ethRow = document.createElement('div');
       ethRow.setAttribute('data-token-address', 'ETH');
       ethRow.className = 'border-b border-gray-700 hover:bg-gray-750 cursor-pointer transition-colors duration-150 ease-in-out';
-      
+
       // Format ETH row content
       const ethRowContent = document.createElement('div');
       ethRowContent.className = 'grid grid-cols-3 p-3 items-center';
@@ -2797,29 +2795,29 @@ class VimApp {
         <div class="text-right font-mono text-white">${ethToken.balanceFormatted} ETH</div>
         <div class="text-right text-gray-300">$${ethToken.valueUsd ? ethToken.valueUsd.toFixed(2) : '0.00'}</div>
       `;
-      
+
       ethRow.appendChild(ethRowContent);
       tokenTable.appendChild(ethRow);
-      
+
       // Fetch ERC20 tokens from our token indexing service
       try {
         // Construct API URL to our token service
-        const baseUrl = window.location.hostname === 'localhost' ? 
-          'http://localhost:3000' : 
+        const baseUrl = window.location.hostname === 'localhost' ?
+          'http://localhost:3000' :
           window.location.origin;
-        
+
         // Use chainId directly from the provider instead of separate RPC URL
         const tokenServiceUrl = `${baseUrl}/tokens/${this.safeAddress}?chainId=${this.selectedNetwork.chainId}`;
-        
+
         // Fetch token balances
         const response = await fetch(tokenServiceUrl);
-        
+
         if (!response.ok) {
           throw new Error(`HTTP error! status: ${response.status}`);
         }
-        
+
         const tokens = await response.json();
-        
+
         // If no tokens were found, show a message
         if (tokens.length === 0) {
           const noTokensRow = document.createElement('div');
@@ -2831,21 +2829,21 @@ class VimApp {
           tokens.forEach((token: Token) => {
             // Add to token data array
             tokenData.push(token);
-            
+
             // Create token row
             const tokenRow = document.createElement('div');
             tokenRow.setAttribute('data-token-address', token.address);
             tokenRow.className = 'border-b border-gray-700 hover:bg-gray-750 cursor-pointer transition-colors duration-150 ease-in-out';
-            
+
             // Generate random color for token icon background
             const colors = ['bg-red-100', 'bg-green-100', 'bg-blue-100', 'bg-yellow-100', 'bg-purple-100', 'bg-pink-100'];
             const randomColor = colors[Math.floor(Math.random() * colors.length)];
-            
+
             // Format value if available
             const valueDisplay = token.valueUsd != null
               ? `$${token.valueUsd.toFixed(2)}`
               : '$0.00';
-            
+
             tokenRow.innerHTML = `
               <div class="grid grid-cols-3 p-3 items-center">
                 <div class="flex items-center space-x-2">
@@ -2860,75 +2858,75 @@ class VimApp {
                 <div class="text-right text-gray-300">${valueDisplay}</div>
               </div>
             `;
-            
+
             tokenTable.appendChild(tokenRow);
           });
         }
       } catch (tokenError: unknown) {
         console.error('Error fetching ERC20 tokens:', tokenError);
-        
+
         // Show error message for token fetch
         const errorRow = document.createElement('div');
         errorRow.className = 'p-4 text-center text-red-400';
         errorRow.textContent = tokenError instanceof Error ? tokenError.message : 'Unknown error fetching ERC20 tokens';
         tokenTable.appendChild(errorRow);
       }
-      
+
       container.appendChild(tokenTable);
-      
+
       // Add help text (similar to pending tx screen)
       const helpText = document.createElement('p');
       helpText.className = 'text-center text-gray-400 text-xs mt-4';
       helpText.textContent = 'Use ↑/↓ keys to navigate, Enter to send token, : to enter command mode';
       container.appendChild(helpText);
-      
+
       // Function to update focus (similar to pending tx screen)
       const updateFocus = (index: number) => {
         console.log(`Updating focus to index ${index}`);
         const rows = tokenTable.querySelectorAll('div[data-token-address]');
         if (rows.length === 0) return;
-        
+
         // Limit index to valid range
         currentFocusIndex = Math.max(0, Math.min(index, rows.length - 1));
-        
+
         // Remove active class from all rows
         rows.forEach(row => {
           row.classList.remove('bg-gray-700', 'selected-token', 'border-l-4', 'border-l-blue-500');
-          
+
           // Reset any modified padding
           const content = row.querySelector('.grid');
           if (content) {
             content.classList.remove('pl-2');
           }
         });
-        
+
         // Get the row to focus
         const rowToFocus = rows[currentFocusIndex];
         if (!rowToFocus) return;
-        
+
         // Add very distinctive styling to the selected row - exactly like pending tx screen
         rowToFocus.classList.add('bg-gray-700', 'selected-token', 'border-l-4', 'border-l-blue-500');
-        
+
         // Adjust padding for the content to account for the border
         const content = rowToFocus.querySelector('.grid');
         if (content) {
           content.classList.add('pl-2');
         }
-        
+
         // Make sure the focused row is visible
         rowToFocus.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-        
+
         console.log(`Focus updated to token at index ${currentFocusIndex}`);
       };
-      
+
       // Make updateFocus globally accessible for tab switching
       (window as any).currentTokenTableUpdateFocus = updateFocus;
-      
+
       // Add keyboard navigation (similar to pending tx screen)
       tokenTable.addEventListener('keydown', (e: KeyboardEvent) => {
         const totalTokens = tokenData.length;
         console.log('Token table keydown:', e.key); // Debug logging
-        
+
         switch (e.key) {
           case 'ArrowUp':
             e.preventDefault();
@@ -2936,14 +2934,14 @@ class VimApp {
               updateFocus(currentFocusIndex - 1);
             }
             break;
-            
+
           case 'ArrowDown':
             e.preventDefault();
             if (currentFocusIndex < totalTokens - 1) {
               updateFocus(currentFocusIndex + 1);
             }
             break;
-            
+
           case 'Enter':
             e.preventDefault();
             // Only allow token sending if user is an owner
@@ -2959,13 +2957,13 @@ class VimApp {
                   });
                   selectedRow.classList.add('bg-gray-700', 'selected-token');
                 }
-                
+
                 // Show token sending screen
                 self.showTokenSendingScreen(token);
               }
             }
             break;
-            
+
           case ':':
             e.preventDefault();
             // Focus the command input when colon is pressed
@@ -2979,7 +2977,7 @@ class VimApp {
             break;
         }
       });
-      
+
       // Add click handlers for rows
       const rows = tokenTable.querySelectorAll('div[data-token-address]');
       rows.forEach((row, index) => {
@@ -2987,17 +2985,17 @@ class VimApp {
           // First explicitly focus the token table
           console.log('Token row clicked, focusing table');
           tokenTable.focus();
-          
+
           // Update focus with animation to make it obvious
           updateFocus(index);
-          
+
           // If owner, handle double-click separately
           if (isOwner) {
             // Track clicks for double-click detection
             const now = new Date().getTime();
             const lastClick = (row as any)._lastClickTime || 0;
             (row as any)._lastClickTime = now;
-            
+
             // If double click (within 300ms), show token sending screen
             if (now - lastClick < 300) {
               console.log('Double click detected, showing token sending screen');
@@ -3009,7 +3007,7 @@ class VimApp {
           }
         });
       });
-      
+
       // Set initial focus
       setTimeout(() => {
         console.log('Setting initial focus on token table');
@@ -3018,7 +3016,7 @@ class VimApp {
         tokenTable.focus({preventScroll: false});
         updateFocus(0);
       }, 100);
-      
+
     } catch (error: unknown) {
       console.error('Error fetching token balances:', error);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -3031,8 +3029,8 @@ class VimApp {
   }
 
   private updateTitle(): void {
-    document.title = this.safeAddress ? 
-      `Safe ${truncateAddress(this.safeAddress)} - Minimalist Safe{Wallet}` : 
+    document.title = this.safeAddress ?
+      `Safe ${truncateAddress(this.safeAddress)} - Minimalist Safe{Wallet}` :
       'Minimalist Safe{Wallet}';
   }
 
@@ -3042,13 +3040,13 @@ class VimApp {
       if (!this.walletConnectUI) {
         this.walletConnectUI = new WalletConnectUI(this.buffer, this.walletConnectService);
       }
-      
+
       // Initialize WalletConnect service with chain ID
       await this.walletConnectService.initialize(chainId);
-      
+
       // Update session-related properties
       this.sessionTopic = this.walletConnectService.getSessionTopic();
-      
+
     } catch (error: unknown) {
       console.error('WalletConnect initialization failed:', error);
       this.buffer.innerHTML = '';
@@ -3121,7 +3119,7 @@ class VimApp {
       pasteButton.textContent = 'Paste';
       pasteButton.type = 'button';
       inputContainer.appendChild(pasteButton);
-      
+
       // Add input event to check for pastes via keyboard shortcuts
       input.addEventListener('input', () => {
         // Check if input value changed rapidly (likely from paste)
@@ -3192,15 +3190,15 @@ class VimApp {
         e.preventDefault();
         const inputElement = document.getElementById('wdUri') as HTMLInputElement;
         let uri = inputElement.value.trim();
-        
+
         // Make sure the URI starts with "wc:" if not already
         if (!uri.startsWith('wc:')) {
           uri = 'wc:' + uri;
         }
-        
+
         await this.connectWithWalletConnectUri(uri);
       });
-      
+
       return;
     }
 
@@ -3229,20 +3227,20 @@ class VimApp {
         // Handle session proposal events
         this.dAppClient.on('session_proposal', async (proposal: any) => {
           console.log('Received session proposal:', proposal);
-          
+
           try {
             // Accept the proposal
             const { id, params } = proposal;
-            
+
             // Check if the proposal has any required namespaces
             if (!params?.requiredNamespaces) {
               console.error('Missing required namespaces in the proposal');
               throw new Error('Invalid proposal format: missing required namespaces');
             }
-            
+
             // Create a valid namespaces object even if eip155 is missing
             const supportedNamespaces: any = {};
-            
+
             // Add eip155 namespace with our account
             supportedNamespaces.eip155 = {
               accounts: [`eip155:${this.selectedNetwork.chainId}:${this.safeAddress}`],
@@ -3255,12 +3253,12 @@ class VimApp {
                 'eth_signTransaction'
               ],
               events: [
-                'accountsChanged', 
-                'chainChanged', 
+                'accountsChanged',
+                'chainChanged',
                 'disconnect'
               ]
             };
-            
+
             // If the proposal also has eip155 namespace, use its methods and events
             if (params.requiredNamespaces.eip155) {
               if (params.requiredNamespaces.eip155.methods) {
@@ -3270,48 +3268,48 @@ class VimApp {
                 supportedNamespaces.eip155.events = params.requiredNamespaces.eip155.events;
               }
             }
-            
+
             const approveResponse = await this.dAppClient.approve({
               id,
               namespaces: supportedNamespaces
             });
-            
+
             this.dAppSessionTopic = approveResponse.topic;
             console.log('Session established with topic:', this.dAppSessionTopic);
-            
+
             // Show the dApp indicator in the header with metadata from the proposal
             this.updateDAppConnectionIndicator(params.proposer.metadata);
-            
+
             // Show success message
             this.buffer.innerHTML = '';
             const successContainer = document.createElement('div');
             successContainer.className = 'max-w-2xl mx-auto bg-gray-800 p-6 rounded-lg border border-gray-700 shadow-lg';
-            
+
             const successTitle = document.createElement('h3');
             successTitle.className = 'text-xl font-bold text-white mb-4';
             successTitle.textContent = 'Connection Successful';
-            
+
             const successMsg = document.createElement('p');
             successMsg.textContent = `Connected to dApp (Session: ${this.dAppSessionTopic})`;
             successMsg.className = 'text-green-400 mb-4';
-            
+
             const dAppInfo = document.createElement('div');
             dAppInfo.className = 'mt-4 p-4 bg-gray-900 rounded-lg border border-gray-700';
-            
+
             if (params.proposer.metadata.name) {
               const dAppName = document.createElement('p');
               dAppName.className = 'text-white font-medium';
               dAppName.textContent = `dApp: ${params.proposer.metadata.name}`;
               dAppInfo.appendChild(dAppName);
             }
-            
+
             if (params.proposer.metadata.url) {
               const dAppUrl = document.createElement('p');
               dAppUrl.className = 'text-gray-400 text-sm';
               dAppUrl.textContent = `URL: ${params.proposer.metadata.url}`;
               dAppInfo.appendChild(dAppUrl);
             }
-            
+
             successContainer.appendChild(successTitle);
             successContainer.appendChild(successMsg);
             successContainer.appendChild(dAppInfo);
@@ -3319,18 +3317,18 @@ class VimApp {
           } catch (error: any) {
             console.error('Error handling session proposal:', error);
             this.buffer.innerHTML = '';
-            
+
             const errorContainer = document.createElement('div');
             errorContainer.className = 'max-w-2xl mx-auto bg-gray-800 p-6 rounded-lg border border-gray-700 shadow-lg';
-            
+
             const errorTitle = document.createElement('h3');
             errorTitle.className = 'text-xl font-bold text-white mb-4';
             errorTitle.textContent = 'Connection Failed';
-            
+
             const errorMsg = document.createElement('p');
             errorMsg.textContent = `Failed to connect to dApp: ${error.message || 'Unknown error'}`;
             errorMsg.className = 'text-red-400';
-            
+
             errorContainer.appendChild(errorTitle);
             errorContainer.appendChild(errorMsg);
             this.buffer.appendChild(errorContainer);
@@ -3339,15 +3337,15 @@ class VimApp {
 
         this.dAppClient.on('session_delete', (event: any) => {
           console.log('dApp session deleted:', event);
-          
+
           // Reset the dApp session
           this.dAppSessionTopic = null;
-          
+
           // Hide the dApp indicator in the header
           this.hideDAppConnectionIndicator();
-          
+
           // Notify the user about the disconnection if we're not in the middle of disconnecting
-          if (this.buffer.innerHTML.includes('Connecting to dApp') || 
+          if (this.buffer.innerHTML.includes('Connecting to dApp') ||
               !this.buffer.innerHTML.includes('disconnected from dApp')) {
             this.buffer.innerHTML = '';
             const disconnectMsg = document.createElement('p');
@@ -3361,22 +3359,22 @@ class VimApp {
       // Show loading message
       this.buffer.innerHTML = '';
       this.buffer.className = 'flex-1 p-4 overflow-y-auto';
-      
+
       const loadingContainer = document.createElement('div');
       loadingContainer.className = 'max-w-2xl mx-auto bg-gray-800 p-6 rounded-lg border border-gray-700 shadow-lg text-center';
-      
+
       const loadingTitle = document.createElement('h3');
       loadingTitle.className = 'text-xl font-bold text-white mb-4';
       loadingTitle.textContent = 'Connecting to dApp';
-      
+
       const loadingMsg = document.createElement('p');
       loadingMsg.textContent = 'Please wait while we establish the connection...';
       loadingMsg.className = 'text-gray-300 mb-6';
-      
+
       const loadingSpinner = document.createElement('div');
       loadingSpinner.className = 'inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-blue-500 border-r-transparent align-[-0.125em] motion-reduce:animate-[spin_1.5s_linear_infinite]';
       loadingSpinner.setAttribute('role', 'status');
-      
+
       loadingContainer.appendChild(loadingTitle);
       loadingContainer.appendChild(loadingMsg);
       loadingContainer.appendChild(loadingSpinner);
@@ -3385,23 +3383,23 @@ class VimApp {
       try {
         // Pair with the dApp using the URI
         await this.dAppClient.pair({ uri });
-        
+
         // The session will be established through the session_proposal event listener
       } catch (error: any) {
         console.error('Failed to connect to dApp:', error);
         this.buffer.innerHTML = '';
-        
+
         const errorContainer = document.createElement('div');
         errorContainer.className = 'max-w-2xl mx-auto bg-gray-800 p-6 rounded-lg border border-gray-700 shadow-lg';
-        
+
         const errorTitle = document.createElement('h3');
         errorTitle.className = 'text-xl font-bold text-white mb-4';
         errorTitle.textContent = 'Connection Failed';
-        
+
         const errorMsg = document.createElement('p');
         errorMsg.textContent = `Failed to connect to dApp: ${error.message || 'Unknown error'}`;
         errorMsg.className = 'text-red-400';
-        
+
         errorContainer.appendChild(errorTitle);
         errorContainer.appendChild(errorMsg);
         this.buffer.appendChild(errorContainer);
@@ -3409,18 +3407,18 @@ class VimApp {
     } catch (error) {
       console.error('Error connecting with WalletConnect URI:', error);
       this.buffer.innerHTML = '';
-      
+
       const errorContainer = document.createElement('div');
       errorContainer.className = 'max-w-2xl mx-auto bg-gray-800 p-6 rounded-lg border border-gray-700 shadow-lg';
-      
+
       const errorTitle = document.createElement('h3');
       errorTitle.className = 'text-xl font-bold text-white mb-4';
       errorTitle.textContent = 'Connection Error';
-      
+
       const errorMsg = document.createElement('p');
       errorMsg.textContent = `Error: ${error instanceof Error ? error.message : 'Unknown error'}`;
       errorMsg.className = 'text-red-400';
-      
+
       errorContainer.appendChild(errorTitle);
       errorContainer.appendChild(errorMsg);
       this.buffer.appendChild(errorContainer);
@@ -3433,11 +3431,11 @@ class VimApp {
   // Add these new methods to handle the dApp connection indicator
   private updateDAppConnectionIndicator(metadata: any): void {
     if (!metadata) return;
-    
+
     const dappIndicator = document.getElementById('dapp-connection-indicator');
     const dappIcon = document.getElementById('dapp-icon') as HTMLImageElement;
     const dappName = document.getElementById('dapp-name');
-    
+
     if (dappIndicator && dappIcon && dappName) {
       // Set the dApp icon if available
       if (metadata.icons && metadata.icons.length > 0) {
@@ -3446,18 +3444,18 @@ class VimApp {
         // Default icon if none provided
         dappIcon.src = 'https://safe.global/images/logo.png';
       }
-      
+
       // Set the dApp name
       dappName.textContent = metadata.name || 'Connected dApp';
-      
+
       // Show the indicator
       dappIndicator.classList.remove('hidden');
     }
   }
-  
+
   private hideDAppConnectionIndicator(): void {
     const dappIndicator = document.getElementById('dapp-connection-indicator');
-    
+
     if (dappIndicator) {
       dappIndicator.classList.add('hidden');
     }
@@ -3479,7 +3477,7 @@ class VimApp {
     try {
       // Set connecting flag to prevent duplicate requests
       this.isConnecting = true;
-      
+
       // Get signer account
       const signerAccount = this.signerAddress;
       if (!signerAccount) throw new Error('Failed to get signer account');
@@ -3488,10 +3486,10 @@ class VimApp {
       if (!this.cachedSafeInfo) {
         await this.loadAndCacheSafeInfo();
       }
-      
+
       // Get contract address for current network
       const contractAddresses = getContractAddress(this.selectedNetwork);
-      
+
       // Get transaction details from the SafeTxPool contract
       const safeTxPool = new SafeTxPool(contractAddresses.safeTxPool, this.selectedNetwork);
       let txDetails;
@@ -3501,17 +3499,17 @@ class VimApp {
         console.error("Error fetching transaction details:", error);
         throw new Error(`Failed to retrieve transaction details: ${error instanceof Error ? error.message : 'Unknown error'}`);
       }
-      
+
       if (!txDetails || !txDetails.to) {
         throw new Error('Invalid transaction: missing required fields');
       }
-      
+
       // Get signatures array
       const signatures = txDetails.signatures || [];
-      
+
       // Format signatures for Safe contract
       const formattedSignatures = formatSafeSignatures(signatures);
-      
+
       // Create Safe transaction parameters
       const safeInterface = new ethers.Interface([
         'function execTransaction(address to, uint256 value, bytes data, uint8 operation, uint256 safeTxGas, uint256 baseGas, uint256 gasPrice, address gasToken, address refundReceiver, bytes signatures) returns (bool)'
@@ -3520,7 +3518,7 @@ class VimApp {
       // Ensure data is properly formatted
       const data = txDetails.data || '0x';
       const value = txDetails.value || '0x0';
-      
+
       // Create the transaction parameters exactly as Safe expects them
       const params = [
         txDetails.to,
@@ -3534,10 +3532,10 @@ class VimApp {
         ethers.ZeroAddress, // refundReceiver
         formattedSignatures // Use the formatted signatures
       ];
-      
+
       // Encode the transaction data
       const encodedTxData = safeInterface.encodeFunctionData('execTransaction', params);
-      
+
       // Prepare transaction request
       const request = await prepareTransactionRequest({
         provider: this.provider,
@@ -3635,14 +3633,14 @@ class VimApp {
     } catch (error: any) {
       console.error("Error in transaction execution:", error);
       this.buffer.innerHTML = '';
-      
+
       const errorDiv = document.createElement('div');
       errorDiv.className = 'max-w-2xl mx-auto bg-red-900/50 p-6 rounded-lg border border-red-700 shadow-lg';
-      
+
       // Create a user-friendly error message
       let errorMessage = 'Transaction execution failed';
       let errorDetails = error.message || 'Unknown error occurred during transaction execution';
-      
+
       errorDiv.innerHTML = `
         <div class="flex items-center gap-3 mb-4">
           <svg class="w-6 h-6 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -3668,13 +3666,13 @@ class VimApp {
   private showTokenSendingScreen(token: Token): void {
     console.log('Showing token sending screen for:', token);
     console.log(`Token decimals: ${token.decimals}, Raw balance: ${token.balance}, Formatted balance: ${token.balanceFormatted}`);
-    
+
     // Check that the token has the decimal property
     if (token.decimals === undefined) {
       console.error('⚠️ ERROR: Token decimals information is missing!');
     } else {
       console.log(`Token decimals verification passed: ${token.decimals}`);
-      
+
       // Verify that the balance parsing works correctly
       try {
         const testParse = ethers.parseUnits(token.balanceFormatted.replace(/,/g, ''), token.decimals);
@@ -3683,7 +3681,7 @@ class VimApp {
         console.error('Error test parsing token balance:', error);
       }
     }
-    
+
     // Clear existing content
     this.buffer.innerHTML = '';
     this.buffer.className = 'flex-1 p-4 overflow-y-auto';
@@ -3696,7 +3694,7 @@ class VimApp {
     const title = document.createElement('h3');
     title.className = 'text-xl font-bold text-white mb-2';
     title.textContent = `Send ${token.symbol}`;
-    
+
     // Add token info subtitle
     const subtitle = document.createElement('p');
     subtitle.className = 'text-gray-400 text-sm mb-6';
@@ -3717,13 +3715,13 @@ class VimApp {
       // For ERC20, we'll call the token contract with transfer() function
       this.txFormData = { to: token.address, value: '0', data: '' };
       console.log('Initialized ERC20 transfer data structure');
-      
+
       // Verify that ERC20 token decimal information is available
       if (token.decimals === undefined) {
         console.warn('Token decimals information is missing!');
       }
     }
-    
+
     // Define fields for the token transfer form
     const fields = [
       {
@@ -3765,27 +3763,27 @@ class VimApp {
         // Create custom dropdown container
         const dropdownContainer = document.createElement('div');
         dropdownContainer.className = 'absolute z-10 mt-1 w-full overflow-auto rounded-md bg-gray-800 py-1 text-base shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none sm:text-sm hidden';
-        
+
         // Add owner options if available
         if (this.cachedSafeInfo && this.cachedSafeInfo.owners.length > 0) {
           this.cachedSafeInfo.owners.forEach(owner => {
             const option = document.createElement('div');
             option.className = 'relative cursor-pointer select-none py-2 pl-3 pr-9 text-gray-300 hover:bg-gray-700 hover:text-white text-left';
             option.textContent = owner;
-            
+
             option.addEventListener('click', () => {
               input.value = owner;
               if (isEth) {
                 this.txFormData!.to = owner; // For ETH, recipient is the to field
               } else {
                 // For ERC20, we need to update the transfer call data
-                this.updateERC20TransferData(token.address, owner, 
-                  (document.getElementById('tx-amount') as HTMLInputElement)?.value || '0', 
+                this.updateERC20TransferData(token.address, owner,
+                  (document.getElementById('tx-amount') as HTMLInputElement)?.value || '0',
                   token.decimals);
               }
               dropdownContainer.classList.add('hidden');
             });
-            
+
             dropdownContainer.appendChild(option);
           });
         }
@@ -3797,8 +3795,8 @@ class VimApp {
             this.txFormData!.to = toAddress; // For ETH, recipient is the to field
           } else {
             // For ERC20, we need to update the transfer call data
-            this.updateERC20TransferData(token.address, toAddress, 
-              (document.getElementById('tx-amount') as HTMLInputElement)?.value || '0', 
+            this.updateERC20TransferData(token.address, toAddress,
+              (document.getElementById('tx-amount') as HTMLInputElement)?.value || '0',
               token.decimals);
           }
           dropdownContainer.classList.remove('hidden');
@@ -3831,7 +3829,7 @@ class VimApp {
             e.preventDefault();
             const options = dropdownContainer.children;
             const currentIndex = Array.from(options).findIndex(opt => opt.classList.contains('bg-gray-700'));
-            
+
             if (keyEvent.key === 'ArrowDown') {
               const nextIndex = currentIndex < options.length - 1 ? currentIndex + 1 : 0;
               options[currentIndex]?.classList.remove('bg-gray-700');
@@ -3875,10 +3873,10 @@ class VimApp {
         if (field.id === 'tx-amount') {
           const inputGroup = document.createElement('div');
           inputGroup.className = 'flex';
-          
+
           // Debug the input with an ID for easy reference
           input.dataset.debug = 'amount-input';
-          
+
           const maxButton = document.createElement('button');
           maxButton.type = 'button';
           maxButton.className = 'px-3 py-2 ml-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md';
@@ -3886,12 +3884,12 @@ class VimApp {
           maxButton.onclick = () => {
             // Set the maximum available balance
             console.log(`Setting MAX amount: ${token.balanceFormatted} ${token.symbol} (raw balance: ${token.balance}, decimals: ${token.decimals})`);
-            
+
             // Ensure we use a clean value without formatting for the input
             const cleanValue = token.balanceFormatted.replace(/,/g, '');
             input.value = cleanValue;
             console.log(`Set amount input value to MAX: "${input.value}"`);
-            
+
             // Update txFormData based on token type
             if (isEth) {
               // For ETH, use the value directly
@@ -3901,25 +3899,25 @@ class VimApp {
               // For ERC20, update the transfer data
               const toAddress = (document.getElementById('tx-to') as HTMLInputElement)?.value || '';
               console.log(`Setting ERC20 transfer with MAX amount: "${cleanValue}" (${token.decimals} decimals)`);
-              
+
               // Use cleanValue directly instead of reading from input.value
               this.updateERC20TransferData(token.address, toAddress, cleanValue, token.decimals);
-              
+
               // Verify the data was set
               console.log(`After MAX: txFormData.data = ${this.txFormData?.data}`);
             }
           };
-          
+
           inputGroup.appendChild(input);
           inputGroup.appendChild(maxButton);
-          
+
           fieldContainer.appendChild(label);
           fieldContainer.appendChild(inputGroup);
         } else {
           fieldContainer.appendChild(label);
           fieldContainer.appendChild(input);
         }
-        
+
         // Add input event listener to update txFormData in real-time
         input.addEventListener('input', () => {
           if (field.id === 'tx-to') {
@@ -3938,7 +3936,7 @@ class VimApp {
             // Store the current value directly from the event
             const currentAmountValue = input.value;
             console.log(`Amount input changed to: "${currentAmountValue}" (using direct value from event)`);
-            
+
             if (isEth) {
               // For ETH, use the value directly
               this.txFormData!.value = currentAmountValue;
@@ -3946,7 +3944,7 @@ class VimApp {
               // For ERC20, update the transfer data
               const toAddress = (document.getElementById('tx-to') as HTMLInputElement)?.value || '';
               console.log(`Amount changed: Updating ERC20 data with "${currentAmountValue}" (decimals: ${token.decimals})`);
-              
+
               // Use the current value directly rather than re-reading from the DOM
               this.updateERC20TransferData(token.address, toAddress, currentAmountValue, token.decimals);
               console.log(`After amount update: txFormData.data = ${this.txFormData?.data}`);
@@ -3978,11 +3976,11 @@ class VimApp {
     const helperText = document.createElement('p');
     helperText.className = 'mt-6 text-sm text-gray-400';
     helperText.textContent = 'Fill in the recipient address and amount, then use :p command to propose the transaction.';
-    
+
     // Add token-specific info
     const tokenInfoText = document.createElement('div');
     tokenInfoText.className = 'mt-4 text-sm text-gray-500 p-3 bg-gray-900 rounded-md';
-    
+
     if (isEth) {
       tokenInfoText.innerHTML = `
         <p class="font-medium text-blue-400">Native ETH Transfer</p>
@@ -4002,12 +4000,12 @@ class VimApp {
     formContainer.appendChild(form);
     form.appendChild(helperText);
     form.appendChild(tokenInfoText);
-    
+
     this.buffer.appendChild(formContainer);
-    
+
     console.log(`Token sending screen set up for ${isEth ? 'ETH' : 'ERC20'} token: ${token.symbol}`);
   }
-  
+
   /**
    * Helper method to update txFormData with ERC20 transfer function data
    */
@@ -4017,42 +4015,42 @@ class VimApp {
     console.log(`  - To: ${to}`);
     console.log(`  - Amount (raw): "${amount}"`);
     console.log(`  - Decimals: ${decimals}`);
-    
+
     if (!to) {
       console.log('Missing to address, cannot update ERC20 transfer data');
       return;
     }
-    
+
     try {
       // Create ERC20 interface
       const erc20Interface = new ethers.Interface([
         "function transfer(address to, uint256 amount) returns (bool)"
       ]);
-      
+
       // Parse the amount with the correct number of decimals
       let parsedAmount;
-      
+
       // Properly sanitize the input amount
       const sanitizedAmount = amount.trim().replace(/,/g, '');
       console.log(`Sanitized amount: "${sanitizedAmount}"`);
-      
+
       if (!sanitizedAmount || sanitizedAmount === '') {
         console.log('Empty amount, defaulting to zero');
         parsedAmount = 0n;
       } else {
         try {
           console.log(`Attempting to parse amount "${sanitizedAmount}" with ${decimals} decimals`);
-          
+
           // Parse using ethers parseUnits with proper decimal precision for the token
           parsedAmount = ethers.parseUnits(sanitizedAmount, decimals);
           console.log(`Successfully parsed amount: ${parsedAmount.toString()}`);
-          
+
           // Verify the parsed amount by formatting it back for debugging
           const formattedBack = ethers.formatUnits(parsedAmount, decimals);
           console.log(`Parsed amount formatted back: ${formattedBack}`);
         } catch (parseError) {
           console.error('Error parsing token amount:', parseError);
-          
+
           // Try alternative parsing approaches
           if (sanitizedAmount.includes('.')) {
             // Handle decimal numbers
@@ -4060,12 +4058,12 @@ class VimApp {
               // Extract parts before and after decimal
               const [wholePart, decimalPart = ''] = sanitizedAmount.split('.');
               console.log(`Trying alternative parsing: whole=${wholePart}, decimal=${decimalPart}`);
-              
+
               // Construct a properly formatted decimal string
               const paddedDecimal = decimalPart.padEnd(decimals, '0').substring(0, decimals);
               const wholeNumber = wholePart === '' ? '0' : wholePart;
               console.log(`Padded decimal: ${wholeNumber}.${paddedDecimal}`);
-              
+
               // Try parsing again with the properly formatted number
               parsedAmount = ethers.parseUnits(`${wholeNumber}.${paddedDecimal}`, decimals);
               console.log(`Alternative parsing successful: ${parsedAmount.toString()}`);
@@ -4087,16 +4085,16 @@ class VimApp {
           }
         }
       }
-      
+
       // Encode the transfer function call with the properly parsed amount
       const data = erc20Interface.encodeFunctionData("transfer", [to, parsedAmount]);
       console.log(`Encoded ERC20 transfer data: ${data}`);
-      
+
       // Update txFormData
       this.txFormData!.to = tokenAddress;
-      this.txFormData!.value = "0"; 
+      this.txFormData!.value = "0";
       this.txFormData!.data = data;
-      
+
       // Log the transaction data for debugging
       console.log('Final txFormData:', JSON.stringify(this.txFormData));
     } catch (error) {
@@ -4224,4 +4222,3 @@ class VimApp {
 }
 
 export default VimApp;
-  
